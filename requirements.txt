@@ -1,0 +1,8 @@
+numpy>=1.24
+pandas>=2.0
+xgboost>=2.0
+torch>=2.1
+chronos-forecasting>=1.4
+# PPO trailing exit (training only — the live bot runs the policy in pure numpy)
+gymnasium>=0.29
+stable-baselines3>=2.0

@@ -1,0 +1,70 @@
+{
+  "feat_dim": 334,
+  "embed_dim": 256,
+  "ctx_window": 128,
+  "d_model": 256,
+  "chronos_ckpt": "amazon/chronos-bolt-tiny",
+  "labeler_name": "SuperTrendChronos",
+  "n_classes": 2,
+  "training_metadata": {
+    "train_span": [
+      "2021-04-25 22:00:00+00:00",
+      "2026-05-04 23:57:00+00:00"
+    ],
+    "holdout_span": [
+      "2026-05-04 23:57:00+00:00",
+      "2026-06-04 23:57:00+00:00"
+    ],
+    "n_train_signals": 95421,
+    "label_dist": [
+      67081,
+      28340
+    ],
+    "train_date": "2026-06-05",
+    "seed": 0
+  },
+  "holdout_eval": {
+    "n_signals": 1406,
+    "positive_rate": 0.2795163584637269,
+    "proba_stats": {
+      "mean": 0.2899669110774994,
+      "median": 0.2866757810115814,
+      "max": 0.5734519958496094,
+      "ge_50": 5,
+      "ge_65": 0,
+      "ge_75": 0
+    },
+    "fixed_tp_by_thr": {
+      "0.5": {
+        "trades": 5,
+        "wr": 0.6,
+        "meanR": 1.37,
+        "sumR": 6.8500000000000005,
+        "pf": 4.325242718446602
+      },
+      "0.55": {
+        "trades": 2,
+        "wr": 1.0,
+        "meanR": 2.97,
+        "sumR": 5.94,
+        "pf": Infinity
+      }
+    },
+    "dynamic_tp_by_thr": {
+      "0.5": {
+        "trades": 5,
+        "wr": 0.6,
+        "meanR": 0.8616548156738283,
+        "sumR": 4.308274078369141,
+        "pf": 3.09139518367434
+      },
+      "0.55": {
+        "trades": 2,
+        "wr": 1.0,
+        "meanR": 2.4491370391845706,
+        "sumR": 4.898274078369141,
+        "pf": Infinity
+      }
+    }
+  }
+}
