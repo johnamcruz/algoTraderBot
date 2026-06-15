@@ -71,8 +71,9 @@ def run_backtest(symbol="NQ", start=None, end=None):
     tick = config.TICK_SIZES.get(symbol)
     if tick is None:
         raise SystemExit(f"no tick size for {symbol} — add it to config.TICK_SIZES")
-    if symbol != "NQ":
-        log.warning("⚠️  models are NQ-trained; %s is out of distribution", symbol)
+    if symbol not in config.TRAINED_SYMBOLS:
+        log.warning("⚠️  models are trained on %s; %s is out of distribution",
+                    "/".join(config.TRAINED_SYMBOLS), symbol)
 
     point_value = config.POINT_VALUES.get(symbol)
     tick_value = tick * point_value if point_value else 0.0

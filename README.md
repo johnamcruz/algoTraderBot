@@ -12,13 +12,13 @@ each bar ─► every active strategy detects its entry (SuperTrend flip / EMA c
         ─► PPO policy trails the stop bar-by-bar until exit
 ```
 
-Runs on the supported 3-min futures (`NQ`, `ES`, `RTY`, `YM`, `GC`, `SI`, `CL`).
-The framework — strategies, sizing, and the trailing exit — is ticker-agnostic;
-the shipped **entry models are trained on NQ**, so other tickers run out of
-distribution until retrained on their own data.
+The shipped **entry models are trained on multiple 3-min futures** — `NQ`, `ES`,
+`RTY`, `YM`, and `GC` — so they generalize across those tickers. The framework
+(strategies, sizing, trailing exit) is ticker-agnostic; other symbols (e.g.
+`SI`, `CL`) run out of distribution until retrained on their own data.
 
 > ⚠️ **Educational — places LIVE orders.** Run it on a practice/evaluation
-> account first. 3-min bars; entry models currently trained on NQ.
+> account first. 3-min bars; entry models trained on NQ/ES/RTY/YM/GC.
 
 ## Architecture
 
@@ -178,8 +178,8 @@ history:
 python bot.py --backtest --symbol NQ --start 2026-05-01 --end 2026-06-01
 ```
 
-- `--symbol` reads `data/<symbol>_3min.csv` (NQ, ES, RTY, YM, GC, … — note the
-  models are NQ-trained; other symbols are out of distribution).
+- `--symbol` reads `data/<symbol>_3min.csv`. The models are trained on NQ, ES,
+  RTY, YM, GC; other symbols (SI, CL, …) are out of distribution.
 - `--start` / `--end` are `YYYY-MM-DD` (start inclusive, end exclusive); omit to
   run from the warmup point to the end of file.
 
@@ -211,9 +211,9 @@ The printed holdout table is the source of truth for current performance.
 
 ## Caveats
 
-- **Scope**: the bot runs on any supported 3-min ticker, but the entry models
-  are trained on NQ 3-min UTC bars — other tickers/timeframes are out of
-  distribution until retrained on their own data.
+- **Scope**: the entry models are trained on NQ/ES/RTY/YM/GC 3-min UTC bars and
+  generalize across them; other tickers or timeframes are out of distribution
+  until retrained on their own data.
 - **Feature fidelity**: 68 of the 76 FFM features are computed live; the 8
   session/time columns the current library doesn't emit are left NaN (XGBoost
   handles missing natively). The grade is faithful but not bit-identical to

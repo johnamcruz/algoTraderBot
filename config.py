@@ -35,6 +35,8 @@ TICK_SIZES = {"NQ": 0.25, "ES": 0.25, "RTY": 0.1, "YM": 1.0,
 # Dollar value of a 1.00-point move, per contract (tick_value = tick_size × this).
 POINT_VALUES = {"NQ": 20, "ES": 50, "RTY": 50, "YM": 5,
                 "GC": 100, "SI": 5000, "CL": 1000}
+# Tickers the shipped entry models were trained on (others are out of distribution).
+TRAINED_SYMBOLS = ("NQ", "ES", "RTY", "YM", "GC")
 
 # Position sizing — use either a fixed SIZE or RISK_PER_TRADE (not both).
 #   SIZE           fixed contracts per trade.
