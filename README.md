@@ -21,12 +21,15 @@ The bot is split into small, single-responsibility modules:
 
 | file | responsibility |
 |---|---|
-| `bot.py` | entry point — the bar loop: detect → grade → enter → trail |
-| `config.py` | **all settings**: credentials, active strategies, exit flags |
+| `bot.py` | entry point — `handle_bar` (detect → grade → enter → trail) + live loop + CLI |
+| `config.py` | **all settings**: active strategies, exit flags, tick sizes (+ `.env` creds) |
 | `broker.py` | `TopstepXClient` — REST wrapper over the ProjectX Gateway API |
+| `sim_broker.py` | `SimBroker` — fills/stops/trailing against a CSV for backtests |
+| `backtest.py` | drives `handle_bar` over history with date-range selection |
 | `indicators.py` | SuperTrend / ATR / ADX (reused from `futures_foundation`) + EMA |
 | `strategies/` | the pluggable strategies (one file each) + shared base |
 | `exit_manager.py` | PPO trailing-stop management for an open position |
+| `logsetup.py` | logging to `log/bot.log` (candles, proba, entries) |
 | `trail_exit_env.py` | the PPO training environment + torch-free policy loader |
 | `train_ppo_exit.py` | trains the trailing-exit policy |
 | `precompute_proba.py` | grades flips to filter PPO training to real entries |
@@ -84,16 +87,20 @@ python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-**2. Add your TopstepX credentials** — edit the top of `config.py`:
+**2. Add your TopstepX credentials** — copy `.env.example` to `.env` (gitignored)
+and fill it in:
 
-```python
-TOPSTEPX_USERNAME = "your_login"
-TOPSTEPX_API_KEY  = "your_api_key"   # the API KEY from the dashboard, not your password
-ACCOUNT = ""                          # "" = first tradable account, or set id/name
+```bash
+cp .env.example .env
+```
+```ini
+TOPSTEPX_USERNAME=your_login
+TOPSTEPX_API_KEY=your_api_key     # the API KEY from the dashboard, not your password
+TOPSTEPX_ACCOUNT=                 # blank = first tradable account, or set id/name
 ```
 
-(Or leave `config.py` alone and export `TOPSTEPX_USERNAME` /
-`TOPSTEPX_API_KEY` / `TOPSTEPX_ACCOUNT` as environment variables — they win.)
+(Real environment variables override `.env`. Credentials are only needed for
+live trading — backtesting works without them.)
 
 **3. Pick your strategies & exit** in `config.py`:
 
@@ -128,6 +135,27 @@ and every trailing-stop move are logged via `log.info` to both the console and
   ratchets in your favor. If no policy is present it falls back to a fixed `RR`
   bracket. The policy forward-pass is pure numpy, so the bot never loads
   torch/SB3 next to xgboost.
+
+## Backtest (no API, no credentials)
+
+Run the **exact live logic** — same strategies, grading, and PPO trailing exit —
+over a local CSV, with a simulated broker filling entries/stops/trailing against
+history:
+
+```bash
+python bot.py --backtest --symbol NQ --start 2026-05-01 --end 2026-06-01
+```
+
+- `--symbol` reads `data/<symbol>_3min.csv` (NQ, ES, RTY, YM, GC, … — note the
+  models are NQ-trained; other symbols are out of distribution).
+- `--start` / `--end` are `YYYY-MM-DD` (start inclusive, end exclusive); omit to
+  run from the warmup point to the end of file.
+
+It prints a summary (trades, win rate, mean/sum R, profit factor) with per-strategy
+and per-exit-reason breakdowns, and writes every trade to `log/backtest_<symbol>.csv`.
+Entries fill at the signal bar's close; conservative fills assume the stop before
+the target when a bar straddles both. Grading embeds each signal through Chronos,
+so longer ranges take a while.
 
 ## Retrain the trailing exit (optional)
 

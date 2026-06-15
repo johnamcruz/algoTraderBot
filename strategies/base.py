@@ -61,7 +61,9 @@ def ffm_block(bars: pd.DataFrame, i: int) -> np.ndarray:
     out = np.full(len(FFM_COLS), np.nan, dtype=np.float32)
     for k, name in enumerate(FFM_COLS):
         if name in cols:
-            out[k] = row[name]
+            val = row[name]
+            if pd.notna(val):          # leave NaN for absent/NA (XGBoost handles it)
+                out[k] = val
     return out
 
 

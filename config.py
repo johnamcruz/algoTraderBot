@@ -6,21 +6,32 @@ TOPSTEPX_ACCOUNT environment variables (those win over the values here).
 """
 import os
 
+try:
+    from dotenv import load_dotenv
+except ImportError:                       # dotenv optional (not needed for backtest)
+    def load_dotenv(*a, **k):
+        return False
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-# ══════════════════════════════════════════════════════════════════════
-#  EDIT THESE  (the API KEY from your TopstepX dashboard — not your password)
-TOPSTEPX_USERNAME = "your_login_here"
-TOPSTEPX_API_KEY  = "your_api_key_here"
-# Which account to trade. "" = first tradable account, or set id/name.
-ACCOUNT = ""
-# ══════════════════════════════════════════════════════════════════════
+# ── credentials ────────────────────────────────────────────────────────
+# Stored in a .env file (gitignored) — copy .env.example to .env and fill in.
+#   TOPSTEPX_USERNAME=...   TOPSTEPX_API_KEY=...   TOPSTEPX_ACCOUNT=...
+# Real environment variables still win over .env.
+load_dotenv(os.path.join(HERE, ".env"))
+TOPSTEPX_USERNAME = os.environ.get("TOPSTEPX_USERNAME", "")
+TOPSTEPX_API_KEY  = os.environ.get("TOPSTEPX_API_KEY", "")
+ACCOUNT = os.environ.get("TOPSTEPX_ACCOUNT", "")   # "" = first tradable account
 
 # ── market / sizing ────────────────────────────────────────────────────
 API_BASE = "https://api.topstepx.com/api"
 SYMBOL = "NQ"
 TIMEFRAME_MIN = 3
 SIZE = 1
+
+# Tick sizes for backtesting (live mode reads tickSize from the broker).
+TICK_SIZES = {"NQ": 0.25, "ES": 0.25, "RTY": 0.1, "YM": 1.0,
+              "GC": 0.1, "SI": 0.005, "CL": 0.01}
 
 # ── strategy selection ─────────────────────────────────────────────────
 # Which strategies run. One name = single strategy; list both to run them

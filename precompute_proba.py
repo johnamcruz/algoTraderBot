@@ -42,8 +42,8 @@ def _ffm_matrix(df: pd.DataFrame) -> np.ndarray:
                             instrument=config.SYMBOL, atr_period=config.ATR_P)
     out = np.full((len(df), len(_FFM_COLS)), np.nan, dtype=np.float32)
     for k, name in enumerate(_FFM_COLS):
-        if name in feats.columns:
-            out[:, k] = feats[name].to_numpy(dtype=np.float32)
+        if name in feats.columns:       # coerce nullable/NA → NaN
+            out[:, k] = pd.to_numeric(feats[name], errors="coerce").to_numpy(np.float32)
     return out
 
 
