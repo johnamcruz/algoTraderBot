@@ -62,7 +62,7 @@ MAX_CONTRACTS = 10         # cap on risk-sized contracts
 # ── strategy selection ─────────────────────────────────────────────────
 # Which strategies run. One name = single strategy; list both to run them
 # together — when both fire on the same bar, the higher-proba signal is taken.
-ACTIVE_STRATEGIES = ["ema"]                    # "supertrend" and/or "ema"
+ACTIVE_STRATEGIES = ["ema"]                    # any of: supertrend, ema, keltner, bos
 PROBA_FLOOR = 0.35          # enter only when a strategy grades its signal >= this
 
 # ── shared trade definition (matches how the models scored trades) ─────
