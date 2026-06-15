@@ -19,6 +19,7 @@ Strategies and exit behaviour are configured in config.py / .env. Run:
 ⚠️  EDUCATIONAL — live mode places LIVE orders. Run it on a practice/evaluation
     account first. NQ 3-min is the models' training scope.
 """
+import datetime as dt
 import os
 import time
 
@@ -174,11 +175,29 @@ def run():
     log.info("▶ running — Ctrl-C to stop")
 
     trade_state = None
+    rolled_on = dt.datetime.now(dt.timezone.utc).date()
     while True:
         # wait for the next bar close (+2s so the API has published it)
         period = config.TIMEFRAME_MIN * 60
         time.sleep(period - (time.time() % period) + 2)
         try:
+            # Follow the roll: the broker API is the source of truth for the
+            # front month. Re-resolve once a day while flat so a long-running
+            # session moves to the new front contract (and its clean warmup
+            # history) without a restart.
+            today = dt.datetime.now(dt.timezone.utc).date()
+            if today != rolled_on and trade_state is None \
+                    and client.open_position(ctx.account_id, ctx.contract_id) is None:
+                rolled_on = today
+                front = client.get_active_contract(config.SYMBOL)
+                if front["id"] != ctx.contract_id:
+                    ctx.contract_id = front["id"]
+                    ctx.tick_size = float(front["tickSize"])
+                    ctx.tick_value = float(front["tickValue"])
+                    log.info("🔄 rolled to front contract %s (tick %g, $%g/tick)",
+                             front.get("name", front["id"]),
+                             ctx.tick_size, ctx.tick_value)
+
             bars = client.get_bars(ctx.contract_id, config.TIMEFRAME_MIN)
             if len(bars) < config.CTX + 30:    # need >=128 closes + warmup
                 continue

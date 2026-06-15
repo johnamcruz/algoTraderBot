@@ -266,6 +266,12 @@ current performance.
 - **Exit mode**: default `USE_TRAILING_STOP = False` is the PPO-driven reprice
   (what it's trained for). `True` uses the ProjectX native trailing bracket
   (`type 5`); the PPO can only *tighten* that, so it mostly sits idle.
+- **Contract rollover**: live trading always uses the broker's **active front
+  month** (`/Contract/search`), and the bot re-resolves it once a day while flat,
+  so a long-running session follows the quarterly roll to the new contract — and
+  its clean warmup history — without a restart. The API is the source of truth;
+  there is no roll calendar to drift. (Backtests use continuous CSV history, so
+  they're unaffected.)
 - **Online only**: the broker API is the single source of truth for contract
   specs (tick size / value) — there is no hard-coded fallback, so the bot needs
   credentials + connectivity at startup for both live and backtest. (The Chronos
