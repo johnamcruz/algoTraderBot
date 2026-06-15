@@ -28,6 +28,7 @@ class Trade:
     exit: float
     risk: float
     r: float                # realized R-multiple
+    mfe_r: float            # max favorable excursion, in R (best the trade ever showed)
     bars_held: int
     reason: str             # "stop" | "target" | "eod"
 
@@ -56,6 +57,9 @@ class SimBroker:
         bar = self.df.iloc[i]
         sign, hi, lo = p["sign"], bar["high"], bar["low"]
 
+        # track max favorable excursion (the best price seen this bar)
+        p["best"] = max(p["best"], hi) if sign > 0 else min(p["best"], lo)
+
         hit_stop = (lo <= p["stop"]) if sign > 0 else (hi >= p["stop"])
         if hit_stop:
             self._close(p["stop"], i, "stop")
@@ -69,12 +73,8 @@ class SimBroker:
         p["bars_held"] += 1
         if p.get("trailing"):          # native trailing stop ratchets to best price
             dist = p["trail_ticks"] * self.tick
-            if sign > 0:
-                p["best"] = max(p["best"], hi)
-                p["stop"] = max(p["stop"], p["best"] - dist)
-            else:
-                p["best"] = min(p["best"], lo)
-                p["stop"] = min(p["stop"], p["best"] + dist)
+            p["stop"] = (max(p["stop"], p["best"] - dist) if sign > 0
+                         else min(p["stop"], p["best"] + dist))
 
     def close_open(self):
         """Force-close any open position at the last bar's close (end of data)."""
@@ -89,11 +89,12 @@ class SimBroker:
     def _close(self, price, i, reason):
         p = self.pos
         r = p["sign"] * (price - p["entry"]) / p["risk"]
+        mfe_r = p["sign"] * (p["best"] - p["entry"]) / p["risk"]
         self.trades.append(Trade(
             strategy=p.get("strategy") or "?", direction=p["sign"],
             entry_time=self.df.iloc[p["entry_idx"]]["time"], entry=p["entry"],
             exit_time=self.df.iloc[i]["time"], exit=price, risk=p["risk"],
-            r=float(r), bars_held=p["bars_held"], reason=reason))
+            r=float(r), mfe_r=float(mfe_r), bars_held=p["bars_held"], reason=reason))
         self.pos = None
 
     # ── TopstepXClient-compatible surface ──────────────────────────────

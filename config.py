@@ -62,7 +62,11 @@ FFM_COLUMNS_PATH = os.path.join(MODELS_DIR, "ffm_feature_columns.json")
 # When a PPO policy is present the bot manages the exit with a trailing stop;
 # otherwise it falls back to a fixed RR bracket.
 USE_PPO_EXIT = True
-USE_TRAILING_STOP = True    # True = broker-native trailing stop, PPO tightens it;
-                            # False = plain stop the PPO reprices each bar
+# False (default) = PPO trailing: the policy reprices the stop each bar via
+#   /Order/modify — this is what the policy is trained for, so the trail is fully
+#   policy-driven (can loosen or tighten the trail distance).
+# True = broker-native trailing stop that the PPO can only *tighten* — simpler
+#   intra-bar protection, but the policy can't widen, so it mostly sits idle.
+USE_TRAILING_STOP = False
 POLICY_PATH = os.path.join(MODELS_DIR, "rl_trail_exit", "ppo_trail_exit.npz")
 RR = 2.0                    # fixed-R take-profit fallback (no PPO policy)

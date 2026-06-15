@@ -108,8 +108,10 @@ live trading — backtesting works without them.)
 ACTIVE_STRATEGIES = ["supertrend", "ema"]   # one name, or both (highest proba wins)
 PROBA_FLOOR       = 0.35                     # only take signals graded ≥ this
 USE_PPO_EXIT      = True                     # False → fixed-RR bracket instead
-USE_TRAILING_STOP = True                     # True → broker-native trailing stop;
-                                             # False → plain stop the PPO reprices
+USE_TRAILING_STOP = False                    # False → PPO reprices the stop each bar
+                                             #         (policy-driven, the default);
+                                             # True  → broker-native trail (PPO can
+                                             #         only tighten it)
 ```
 
 **4. Run:**
@@ -129,13 +131,13 @@ and every trailing-stop move are logged via `log.info` to both the console and
   `grade()`. Signals with `proba ≥ PROBA_FLOOR` are candidates; the **highest
   proba wins** (one position per contract). The trade enters at market with a
   protective stop at `0.5×ATR(20)` — exactly how the models scored the trade.
-- **Exit** — the PPO policy (`models/rl_trail_exit/`) reads the open trade each
-  bar (unrealized R, MFE, ATR, momentum, distance from the strategy's reference
-  line) and trails the stop via `/Order/modify`, ratcheting only in your favor.
-  It's trained on the same 0.5×ATR(20) risk the entries use, so it learns the
-  trail on the live scale. If no policy is present it falls back to a fixed `RR`
-  bracket. The policy forward-pass is pure numpy, so the bot never loads
-  torch/SB3 next to xgboost.
+- **Exit** — each bar the PPO policy (`models/rl_trail_exit/`) reads the open
+  trade (unrealized R, MFE, ATR, momentum, distance from the strategy's reference
+  line), computes a trailing-stop level, and **reprices the live stop to it via
+  `/Order/modify`** (ratcheting only in your favor). It's trained on the same
+  0.5×ATR(20) risk the entries use, so it learns the trail on the live scale. If
+  no policy is present it falls back to a fixed `RR` bracket. The policy
+  forward-pass is pure numpy, so the bot never loads torch/SB3 next to xgboost.
 
 ## Backtest (no API, no credentials)
 
@@ -191,8 +193,11 @@ The printed holdout table is the source of truth for current performance.
   runs on every strategy live; for EMA entries the "distance from reference
   line" observation uses the slow EMA, which is slightly outside the training
   distribution. Retrain per-strategy for an exact match.
-- **Native trailing stop**: the `USE_TRAILING_STOP = True` path uses the ProjectX
-  trailing bracket (`type 5`) + `/Order/modify` `trailPrice` (sent as
-  `ticks × tickSize`). Verified against the API docs; confirm on practice, or use
-  `USE_TRAILING_STOP = False` (plain `stopPrice` reprice).
+- **Exit mode**: the default `USE_TRAILING_STOP = False` is the PPO-driven trail
+  (the policy reprices `stopPrice` each bar — what it's trained for). The
+  alternative `True` uses the ProjectX native trailing bracket (`type 5`) +
+  `/Order/modify` `trailPrice`; the PPO can only *tighten* it there, so it mostly
+  sits idle. Backtests show the PPO trail tends to run wide — it captures large
+  favorable excursions (MFE) but gives much of it back; a tighter retrain is the
+  natural next tuning step.
 - **Internet** needed once for the Chronos checkpoint; offline after.

@@ -40,11 +40,16 @@ def _summary(trades, symbol):
         log.info("no trades in range")
         return
     r = np.array([t.r for t in trades])
+    mfe = np.array([t.mfe_r for t in trades])
     wins, losses = r[r > 0].sum(), -r[r < 0].sum()
     pf = wins / losses if losses > 0 else float("inf")
+    capture = r.sum() / mfe.sum() if mfe.sum() > 0 else 0.0
     log.info("─" * 60)
     log.info("BACKTEST %s | trades=%d  win=%.1f%%  meanR=%+.3f  sumR=%+.2f  PF=%.2f",
              symbol, len(r), 100 * (r > 0).mean(), r.mean(), r.sum(), pf)
+    log.info("   MFE: mean=%.2fR  max=%.2fR  | capture (sumR/sumMFE)=%.0f%%  "
+             "| biggest trend caught=%.2fR", mfe.mean(), mfe.max(),
+             100 * capture, r.max())
     # per-strategy and per-exit-reason breakdown
     for key, label in (("strategy", "strategy"), ("reason", "exit")):
         groups = {}
