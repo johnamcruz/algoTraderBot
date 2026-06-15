@@ -5,7 +5,8 @@ A live TopstepX bot that trades **mechanical entries graded by AI**, with a
 `YM`, `GC`).
 
 > ⚠️ **Educational — live mode places LIVE orders.** Run it on a
-> practice/evaluation account first. Backtesting needs no account.
+> practice/evaluation account first. (Backtests place **no** orders, but still
+> need credentials — contract specs are fetched from the broker API.)
 
 ---
 
@@ -157,16 +158,17 @@ signal through Chronos, so longer ranges take a few minutes.
 ## How it works
 
 ```
-each bar ─► every active strategy detects its entry (SuperTrend flip / EMA cross)
+each bar ─► every active strategy detects its entry
         ─► its model grades the signal  →  proba = P(win)
         ─► best signal with proba ≥ floor is taken (highest proba wins)
+        ─► one shared Chronos embedding per bar feeds every strategy's grade
         ─► PPO policy trails the stop bar-by-bar until exit
 ```
 
 Each strategy is a thin signal generator paired with its own Chronos+XGBoost
 model; the model decides *which* signals to take, and a PPO policy decides *when
 to get out*. The entry models are trained on multiple 3-min futures (NQ, ES, RTY,
-YM, GC) and generalize across them; the framework is ticker-agnostic.
+YM, GC) and generalize across them; the framework is ticker- and broker-agnostic.
 
 - **Entry** — when flat, every active strategy gets a chance to `detect()` +
   `grade()`. Signals with `proba ≥ PROBA_FLOOR` are candidates; the **highest
@@ -238,12 +240,14 @@ python bot.py --retrain-exit --quick  # fast smoke retrain
 python train_ppo_exit.py              # same thing, standalone
 ```
 
-Catalogs every SuperTrend flip in `data/NQ_3min.csv`, keeps the ones the bot
-would enter (`proba ≥ 0.35`, cached in `proba_cache.npz`), simulates each trade
-from the live **0.5×ATR(20) stop** with the `ACTIVATE_R`/`GIVEBACK_R` shaping
-while the agent learns the trail, then benchmarks vs fixed-RR / constant-trail
-baselines and writes the policy into `models/rl_trail_exit/`. The printed holdout
-table is the source of truth for current performance.
+Catalogs a representative set of entry points in `data/NQ_3min.csv`, keeps the
+ones the bot would enter (`proba ≥ 0.35`, cached in `proba_cache.npz`), simulates
+each trade from the live **0.5×ATR(20) stop** with the `ACTIVATE_R`/`GIVEBACK_R`
+shaping while the agent learns the trail, then benchmarks vs fixed-RR /
+constant-trail baselines and writes the policy into `models/rl_trail_exit/`. The
+exit is strategy-agnostic (it only sees the trade's R-state), so the same policy
+serves every strategy. The printed holdout table is the source of truth for
+current performance.
 
 ## Caveats
 
@@ -255,7 +259,7 @@ table is the source of truth for current performance.
   handles missing natively) — faithful but not bit-identical to training.
 - **PPO exit**: one **strategy-agnostic** policy on the standard 0.5×ATR(20)
   stop — it sees only the trade's R-state, so it applies identically to every
-  strategy. (SuperTrend flips are just the training catalog of NQ entry points.)
+  strategy (it trains on a representative catalog of NQ entry points).
   With `GIVEBACK_R = 0.75` the give-back cap dominates, so the exit is
   effectively a deterministic "trail 0.75R from peak" — loosen it to let
   trend-riding matter more, tighten it for consistency.
