@@ -36,7 +36,7 @@ TICK_SIZES = {"NQ": 0.25, "ES": 0.25, "RTY": 0.1, "YM": 1.0,
 # ── strategy selection ─────────────────────────────────────────────────
 # Which strategies run. One name = single strategy; list both to run them
 # together — when both fire on the same bar, the higher-proba signal is taken.
-ACTIVE_STRATEGIES = ["supertrend", "ema"]      # "supertrend" and/or "ema"
+ACTIVE_STRATEGIES = ["ema"]                    # "supertrend" and/or "ema"
 PROBA_FLOOR = 0.35          # enter only when a strategy grades its signal >= this
 
 # ── shared trade definition (matches how the models scored trades) ─────
