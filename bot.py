@@ -205,6 +205,10 @@ if __name__ == "__main__":
                     help="simulate over a local CSV (no API calls)")
     ap.add_argument("--symbol", default=config.SYMBOL,
                     help="backtest symbol (uses data/<symbol>_3min.csv)")
+    ap.add_argument("--strategy", nargs="+", metavar="NAME",
+                    choices=list(strat.REGISTRY),
+                    help="strategies to run: %(choices)s "
+                         "(overrides config.ACTIVE_STRATEGIES)")
     ap.add_argument("--start", help="backtest start date (YYYY-MM-DD, inclusive)")
     ap.add_argument("--end", help="backtest end date (YYYY-MM-DD, exclusive)")
     ap.add_argument("--size", type=int,
@@ -227,6 +231,8 @@ if __name__ == "__main__":
 
     if args.size is not None and args.risk is not None:
         raise SystemExit("use either --size or --risk, not both")
+    if args.strategy:
+        config.ACTIVE_STRATEGIES = args.strategy
     if args.proba_floor is not None:
         if not 0.0 <= args.proba_floor <= 1.0:
             raise SystemExit("--proba-floor must be between 0 and 1")

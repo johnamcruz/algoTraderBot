@@ -8,16 +8,20 @@
 """
 import config
 from strategies.base import Signal, Strategy
+from strategies.bos import BosStrategy
 from strategies.ema_cross import EmaCrossStrategy
+from strategies.keltner import KeltnerAdxStrategy
 from strategies.supertrend import SuperTrendStrategy
 
 REGISTRY = {
     SuperTrendStrategy.name: SuperTrendStrategy,
     EmaCrossStrategy.name: EmaCrossStrategy,
+    KeltnerAdxStrategy.name: KeltnerAdxStrategy,
+    BosStrategy.name: BosStrategy,
 }
 
 __all__ = ["Signal", "Strategy", "SuperTrendStrategy", "EmaCrossStrategy",
-           "REGISTRY", "make_strategies"]
+           "KeltnerAdxStrategy", "BosStrategy", "REGISTRY", "make_strategies"]
 
 
 def make_strategies(active=None):

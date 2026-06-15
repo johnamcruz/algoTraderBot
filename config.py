@@ -76,6 +76,12 @@ ST_PERIOD, ST_MULT = 10, 3.0
 EMA_FAST, EMA_SLOW = 9, 20
 SLOW_SLOPE_K = 5
 ADX_GATE = 18.0            # only fire EMA crosses when ADX >= this (trend gate)
+# Keltner-channel breakout strategy params
+KC_LEN, KC_MULT, KC_ATR_P = 20, 1.5, 20
+KC_ADX_THRESH = 20.0      # only fire Keltner breakouts when ADX >= this
+KC_MID_SLOPE_K = 5
+# Break-of-structure strategy params
+SWING_K = 2               # fractal half-width for confirmed swings
 
 # ── models ─────────────────────────────────────────────────────────────
 MODELS_DIR = os.path.join(HERE, "models")

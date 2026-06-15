@@ -73,12 +73,24 @@ summary at the end. If you get that, you're ready.
 ### 4. Run (live)
 
 ```bash
-python bot.py                      # default size from config.SIZE
-python bot.py --size 3             # fixed: 3 contracts per trade
-python bot.py --risk 500           # risk-based: ~$500 risked per trade
+python bot.py                          # config defaults
+python bot.py --strategy ema           # run one strategy
+python bot.py --strategy ema keltner bos   # run several (highest proba wins)
+python bot.py --size 3                  # fixed: 3 contracts per trade
+python bot.py --risk 500                # risk-based: ~$500 risked per trade
 python bot.py --risk 500 --max-contracts 5
-python bot.py --proba-floor 0.45   # only take entries graded ≥ 0.45 confidence
+python bot.py --proba-floor 0.45        # only take entries graded ≥ 0.45 confidence
 ```
+
+**Strategies** (`--strategy` overrides `config.ACTIVE_STRATEGIES`; pick one or
+several — when more than one fires on a bar, the highest-proba signal wins):
+
+| name | entry |
+|---|---|
+| `supertrend` | SuperTrend flip (period 10, mult 3.0) |
+| `ema` | 9/20 EMA crossover, gated to ADX ≥ 18 |
+| `keltner` | Keltner-channel breakout, gated to ADX ≥ 20 |
+| `bos` | break of the last confirmed swing (break of structure) |
 
 On startup the bot prints your tradable accounts and a banner —
 `✅ <account> | <contract> | 3-min | [ema] | conf≥0.35 | exit: PPO stop-reprice |
@@ -90,7 +102,7 @@ every stop move are logged to the console **and** `log/bot.log`. Stop with
 Pick strategies and exit shaping in `config.py`:
 
 ```python
-ACTIVE_STRATEGIES = ["ema"]      # "supertrend", "ema", or both (highest proba wins)
+ACTIVE_STRATEGIES = ["ema"]      # any of: supertrend, ema, keltner, bos (or --strategy)
 PROBA_FLOOR       = 0.35         # min entry confidence (or pass --proba-floor)
 ACTIVATE_R        = 2.0          # hold the initial 1R stop until +2R, then trail
 GIVEBACK_R        = 0.75         # once trailing, give back ≤ this R from the peak
@@ -178,11 +190,11 @@ Small, single-responsibility modules:
 | file | responsibility |
 |---|---|
 | `bot.py` | entry point — `handle_bar` (detect → grade → enter → trail) + live loop + CLI |
-| `config.py` | **all settings**: strategies, sizing, exit shaping, tick sizes |
-| `broker.py` | `TopstepXClient` — REST wrapper over the ProjectX Gateway API |
+| `config.py` | **all settings**: strategies, sizing, exit shaping, strategy params |
+| `broker.py` | `TopstepXClient` — REST wrapper over the ProjectX Gateway API (incl. `/Contract/search` for specs) |
 | `sim_broker.py` | `SimBroker` — fills/stops/trailing against a CSV for backtests |
 | `backtest.py` | drives `handle_bar` over history with date-range selection |
-| `indicators.py` | SuperTrend / ATR / ADX (reused from `futures_foundation`) + EMA |
+| `indicators.py` | SuperTrend / ATR / ADX / EMA / Keltner / swings |
 | `strategies/` | the pluggable strategies (one file each) + shared base |
 | `exit_manager.py` | PPO trailing-stop management for an open position |
 | `logsetup.py` | logging to `log/bot.log` |
@@ -191,11 +203,13 @@ Small, single-responsibility modules:
 | `models/` | the entry models + the trailing-exit policy |
 
 ```
-strategies/                    models/
-  base.py        Strategy ABC     supertrend_chronos.joblib   entry model (SuperTrend)
-  supertrend.py  → supertrend     ema_cross_chronos.joblib    entry model (EMA cross)
-  ema_cross.py   → ema            ffm_feature_columns.json    FFM feature order
-                                  rl_trail_exit/ppo_trail_exit.npz   trailing-exit policy
+strategies/                 models/
+  base.py   Strategy ABC       supertrend_chronos.joblib     entry model (SuperTrend)
+  supertrend.py → supertrend   ema_cross_chronos.joblib      entry model (EMA cross)
+  ema_cross.py  → ema          keltner_adx_chronos.joblib    entry model (Keltner)
+  keltner.py    → keltner      bos_chronos.joblib            entry model (BOS)
+  bos.py        → bos          ffm_feature_columns.json      FFM feature order
+                               rl_trail_exit/ppo_trail_exit.npz   trailing-exit policy
 ```
 
 The bot depends only on the public **`futures_foundation`** library (Chronos
@@ -204,7 +218,9 @@ code. The joblib bundles run **inference directly**; the FFM feature block is
 computed live via `futures_foundation.features.derive_features`.
 
 **Adding a strategy** = one new file in `strategies/` implementing `detect()` /
-`reference_line()` / `_hand_features()`, plus its joblib model in `models/`.
+`reference_line()` / `_hand_features()`, plus its joblib model in `models/`, then
+register it in `strategies/__init__.py`. Four ship today (`supertrend`, `ema`,
+`keltner`, `bos`).
 
 ## Retrain the trailing exit (optional)
 

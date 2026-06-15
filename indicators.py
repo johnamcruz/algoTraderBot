@@ -43,3 +43,39 @@ def ema(close, span: int) -> np.ndarray:
     """Causal recursive EMA (adjust=False → strictly trailing)."""
     return pd.Series(np.asarray(close, dtype=float)).ewm(
         span=span, adjust=False).mean().to_numpy()
+
+
+def keltner_channel(bars: pd.DataFrame, ema_len: int = 20, mult: float = 1.5,
+                    atr_p: int = 20):
+    """Causal Keltner channel → (upper, mid, lower). mid = EMA(close); band =
+    mid ± mult × ATR(atr_p)."""
+    mid = ema(bars["close"].to_numpy(float), ema_len)
+    a = atr(bars, atr_p)
+    return mid + mult * a, mid, mid - mult * a
+
+
+def causal_swings(bars: pd.DataFrame, k: int = 2):
+    """Confirmation-lagged confirmed swings (strictly causal). Returns
+    (sh, sl, shi, sli): at bar i, the most recent confirmed swing-high/low value
+    and its centre-bar index whose confirmation bar (centre + k) is ≤ i; NaN / -1
+    until the first confirmed swing. A fractal centred at j needs k strictly
+    lower highs (or higher lows) on each side and is confirmed only at j + k."""
+    h = bars["high"].to_numpy(np.float64)
+    l = bars["low"].to_numpy(np.float64)
+    n = len(h)
+    sh = np.full(n, np.nan)
+    sl = np.full(n, np.nan)
+    shi = np.full(n, -1, np.int64)
+    sli = np.full(n, -1, np.int64)
+    cur_sh = cur_sl = np.nan
+    cur_shi = cur_sli = -1
+    for i in range(n):
+        j = i - k                              # centre; bar j+k == i just closed
+        if j - k >= 0:                         # full window [j-k, j+k] exists
+            hj, lj = h[j], l[j]
+            if np.all(hj > h[j - k:j]) and np.all(hj > h[j + 1:j + k + 1]):
+                cur_sh, cur_shi = hj, j
+            if np.all(lj < l[j - k:j]) and np.all(lj < l[j + 1:j + k + 1]):
+                cur_sl, cur_sli = lj, j
+        sh[i], sl[i], shi[i], sli[i] = cur_sh, cur_sl, cur_shi, cur_sli
+    return sh, sl, shi, sli
