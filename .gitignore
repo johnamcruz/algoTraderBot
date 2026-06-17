@@ -8,3 +8,5 @@ venv/
 proba_cache.npz
 # secrets
 .env
+# macOS
+.DS_Store
