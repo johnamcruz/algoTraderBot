@@ -11,6 +11,7 @@ from strategies.base import Signal, Strategy, embed_context
 from strategies.bos import BosStrategy
 from strategies.ema_cross import EmaCrossStrategy
 from strategies.keltner import KeltnerAdxStrategy
+from strategies.orb import OrbStrategy
 from strategies.supertrend import SuperTrendStrategy
 
 REGISTRY = {
@@ -18,11 +19,12 @@ REGISTRY = {
     EmaCrossStrategy.name: EmaCrossStrategy,
     KeltnerAdxStrategy.name: KeltnerAdxStrategy,
     BosStrategy.name: BosStrategy,
+    OrbStrategy.name: OrbStrategy,
 }
 
 __all__ = ["Signal", "Strategy", "embed_context", "SuperTrendStrategy",
            "EmaCrossStrategy", "KeltnerAdxStrategy", "BosStrategy",
-           "REGISTRY", "make_strategies"]
+           "OrbStrategy", "REGISTRY", "make_strategies"]
 
 
 def make_strategies(active=None):

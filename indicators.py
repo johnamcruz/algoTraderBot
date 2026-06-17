@@ -54,6 +54,81 @@ def keltner_channel(bars: pd.DataFrame, ema_len: int = 20, mult: float = 1.5,
     return mid + mult * a, mid, mid - mult * a
 
 
+def _et(bars: pd.DataFrame, tz: str):
+    ts = pd.DatetimeIndex(bars["time"])
+    if ts.tz is None:
+        ts = ts.tz_localize("UTC")
+    et = ts.tz_convert(tz)
+    return et.normalize().asi8, (et.hour * 60 + et.minute).to_numpy()
+
+
+def opening_range(bars: pd.DataFrame, orb_bars: int = 5, open_min: int = 570,
+                  tz: str = "America/New_York"):
+    """Causal opening range → (or_high, or_low). At bar i, the high/low of the
+    first `orb_bars` bars at/after `open_min` (minutes from midnight, in `tz`) of
+    i's session day — ACTIVE only from the bar AFTER that window closes (so the
+    range is fully in the past). NaN before activation. Uses only bars ≤ i."""
+    day, tmin = _et(bars, tz)
+    h = bars["high"].to_numpy(float)
+    l = bars["low"].to_numpy(float)
+    n = len(h)
+    or_high = np.full(n, np.nan)
+    or_low = np.full(n, np.nan)
+    cur_day = None
+    oh = ol = np.nan
+    count = 0
+    done = False
+    for i in range(n):
+        if day[i] != cur_day:
+            cur_day, oh, ol, count, done = day[i], np.nan, np.nan, 0, False
+        if (not done) and tmin[i] >= open_min:
+            oh = h[i] if count == 0 else max(oh, h[i])
+            ol = l[i] if count == 0 else min(ol, l[i])
+            count += 1
+            if count >= orb_bars:
+                done = True
+        elif done:
+            or_high[i], or_low[i] = oh, ol
+    return or_high, or_low
+
+
+def orb_extras(bars: pd.DataFrame, orb_bars: int = 5, open_min: int = 570,
+               tz: str = "America/New_York"):
+    """Causal per-day ORB context → (sess_open, prior_close, or_avg_vol):
+    the session open (from `open_min` on), the prior session's last close, and
+    the average volume of the opening-range bars (active after the range closes)."""
+    day, tmin = _et(bars, tz)
+    o = bars["open"].to_numpy(float)
+    c = bars["close"].to_numpy(float)
+    v = bars["volume"].to_numpy(float)
+    n = len(o)
+    sess_open = np.full(n, np.nan)
+    prior_close = np.full(n, np.nan)
+    or_avg_vol = np.full(n, np.nan)
+    cur_day = None
+    day_open = prev_last_close = running_last_close = cur_or_vol = np.nan
+    opened = False
+    vol_sum, vol_cnt, or_done = 0.0, 0, False
+    for i in range(n):
+        if day[i] != cur_day:
+            prev_last_close = running_last_close
+            cur_day, day_open, opened = day[i], np.nan, False
+            vol_sum, vol_cnt, or_done, cur_or_vol = 0.0, 0, False, np.nan
+        if tmin[i] >= open_min:
+            if not opened:
+                day_open, opened = o[i], True
+            if not or_done:
+                vol_sum += v[i]
+                vol_cnt += 1
+                if vol_cnt >= orb_bars:
+                    or_done, cur_or_vol = True, vol_sum / vol_cnt
+        sess_open[i] = day_open if opened else np.nan
+        prior_close[i] = prev_last_close
+        or_avg_vol[i] = cur_or_vol
+        running_last_close = c[i]
+    return sess_open, prior_close, or_avg_vol
+
+
 def causal_swings(bars: pd.DataFrame, k: int = 2):
     """Confirmation-lagged confirmed swings (strictly causal). Returns
     (sh, sl, shi, sli): at bar i, the most recent confirmed swing-high/low value

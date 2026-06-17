@@ -92,6 +92,7 @@ several — when more than one fires on a bar, the highest-proba signal wins):
 | `ema` | 9/20 EMA crossover, gated to ADX ≥ 18 |
 | `keltner` | Keltner-channel breakout, gated to ADX ≥ 20 |
 | `bos` | break of the last confirmed swing (break of structure) |
+| `orb` | 15-min opening-range breakout (09:30 ET), gated to ADX ≥ 18 |
 
 On startup the bot prints your tradable accounts and a banner —
 `✅ <account> | <contract> | 3-min | [ema] | conf≥0.35 | exit: PPO stop-reprice |
@@ -103,7 +104,7 @@ every stop move are logged to the console **and** `log/bot.log`. Stop with
 Pick strategies and exit shaping in `config.py`:
 
 ```python
-ACTIVE_STRATEGIES = ["ema"]      # any of: supertrend, ema, keltner, bos (or --strategy)
+ACTIVE_STRATEGIES = ["ema"]      # any of: supertrend, ema, keltner, bos, orb (or --strategy)
 PROBA_FLOOR       = 0.35         # min entry confidence (or pass --proba-floor)
 ACTIVATE_R        = 2.0          # hold the initial 1R stop until +2R, then trail
 GIVEBACK_R        = 0.75         # once trailing, give back ≤ this R from the peak
@@ -199,7 +200,7 @@ Small, single-responsibility modules:
 | `broker.py` | `TopstepXClient` (a `BrokerClient`) over the ProjectX Gateway API + `make_broker()` |
 | `sim_broker.py` | `SimBroker` (an `OrderRouter`) — fills/stops/trailing against a CSV for backtests |
 | `backtest.py` | drives `handle_bar` over history with date-range selection |
-| `indicators.py` | SuperTrend / ATR / ADX / EMA / Keltner / swings |
+| `indicators.py` | SuperTrend / ATR / ADX / EMA / Keltner / swings / opening range |
 | `embedder.py` / `embed_worker.py` | warm Chronos embedding worker — model loaded once per session |
 | `strategies/` | the pluggable strategies (one file each) + shared base |
 | `exit_manager.py` | PPO trailing-stop management for an open position |
@@ -214,7 +215,8 @@ strategies/                 models/
   supertrend.py → supertrend   ema_cross_chronos.joblib      entry model (EMA cross)
   ema_cross.py  → ema          keltner_adx_chronos.joblib    entry model (Keltner)
   keltner.py    → keltner      bos_chronos.joblib            entry model (BOS)
-  bos.py        → bos          ffm_feature_columns.json      FFM feature order
+  bos.py        → bos          orb_chronos.joblib            entry model (ORB)
+  orb.py        → orb          ffm_feature_columns.json      FFM feature order
                                rl_trail_exit/ppo_trail_exit.npz   trailing-exit policy
 ```
 
@@ -232,7 +234,7 @@ near-instant. Falls back to the one-shot library path if the worker can't start.
 **Adding a strategy** = one new file in `strategies/` implementing `_fired()` /
 `_hand_features()`, plus its joblib model in `models/`, then register it in
 `strategies/__init__.py`. The strategy-agnostic exit applies automatically — no
-exit work per strategy. Four ship today (`supertrend`, `ema`, `keltner`, `bos`).
+exit work per strategy. Five ship today (`supertrend`, `ema`, `keltner`, `bos`, `orb`).
 
 **Adding a broker** = implement `BrokerClient` (`broker_base.py`) in a new module
 and add a case to `broker.make_broker()` + `config.BROKER`. The bar loop, sizing,
