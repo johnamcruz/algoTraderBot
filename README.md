@@ -307,15 +307,26 @@ No network, broker, or Chronos needed — everything runs against the `SimBroker
 and lightweight fakes. Coverage focuses on the order/exit money paths:
 
 - `test_bracket_ticks` — SL/TP ticks signed by direction (the order-rejection fix)
-- `test_close_cancels_brackets` — `close_position` cancels resting brackets so a
-  market close can't orphan a stop into a naked position (the naked-position fix)
+- `test_close_cancels_brackets` / `test_no_orphan_orders` — no orphaned SL **or**
+  TP: against a stateful gateway, after a market close, a give-back exit
+  (`manage_trail`), or a flat reconcile, zero protective orders are left working
+  for the contract (and other contracts are untouched)
 - `test_reconcile` — a flat account is swept of stray orders every bar; an
   in-position bar never cancels its live protective stop (mid-session reconcile)
 - `test_exit_manager` — PPO give-back: activation gate, give-back cap, and the
   intra-bar wick-cross that closes a winner at market instead of riding it back
 - `test_orb_gate` — ORB only fires during the RTH window (no overnight breakouts)
+- `test_indicators` — indicator correctness + strict causality (no look-ahead in
+  EMA / Keltner / opening-range / confirmed swings — they feed every feature)
+- `test_strategy_triggers` — each strategy's `_fired` fires long/short on the
+  right pattern and respects its ADX/trend gate
+- `test_detect_signal` — entry/stop/risk math (`risk = STOP_ATR×ATR`, stop on the
+  correct side) that drives sizing and the exit
 - `test_position_size` — fixed vs risk-based sizing, cap and 1-lot floor
-- `test_sim_broker` — stop/target/trailing fills and the market-close path
+- `test_config_micros` — micro→parent symbol mapping (MNQ→NQ, …)
+- `test_broker_contract` — active front-month selection (rollover) and
+  working-stop filtering, against a stubbed gateway
+- `test_sim_broker` — stop/target/trailing fills, stop-before-target tie, close
 - `test_e2e_trade` — full lifecycles through `backtest.drive` → `bot.handle_bar`
   (the real driver): long/short give-back winners, stop-out loser, fixed-RR
   target + stop, the highest-proba resolver, the proba floor, and

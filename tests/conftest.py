@@ -11,7 +11,8 @@ import config  # noqa: E402
 
 _RESTORE = ["SIZE", "RISK_PER_TRADE", "MAX_CONTRACTS", "PROBA_FLOOR",
             "ACTIVATE_R", "GIVEBACK_R", "ACTIVE_STRATEGIES", "SYMBOL",
-            "RR", "USE_PPO_EXIT", "ORB_ADX_GATE", "ORB_CLOSE_MIN"]
+            "RR", "USE_PPO_EXIT", "ORB_ADX_GATE", "ORB_CLOSE_MIN",
+            "ADX_GATE", "KC_ADX_THRESH", "STOP_ATR", "ATR_P"]
 
 
 @pytest.fixture(autouse=True)

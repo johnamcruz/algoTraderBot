@@ -79,6 +79,17 @@ def test_close_position_fills_at_hint_price_and_cancel_is_noop():
     assert t.reason == "trail" and abs(t.exit - 110.0) < 1e-9 and abs(t.r - 1.0) < 1e-9
 
 
+def test_bar_touching_both_stop_and_target_assumes_stop_first():
+    # conservative fill: if a bar's range spans both levels, the stop wins (−1R)
+    sim = _sim([(100, 100, 100), (121, 89, 100)])     # high≥target(120) AND low≤stop(90)
+    sim.set_bar(0)
+    sim.place_market_with_brackets(0, "NQ", side=SIDE["BUY"], size=1,
+                                   stop_ticks=40, target_ticks=80)
+    _step(sim, 1)
+    t = sim.trades[0]
+    assert t.reason == "stop" and abs(t.r + 1.0) < 1e-9
+
+
 def test_close_open_at_end_of_data():
     sim = _sim([(100, 100, 100), (108, 99, 105)])
     sim.set_bar(0)
