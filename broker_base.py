@@ -58,9 +58,16 @@ class OrderRouter(ABC):
         """Tighten a native trailing stop's follow distance (a price distance)."""
 
     @abstractmethod
+    def cancel_order(self, account_id, order_id) -> dict:
+        """Cancel a working order."""
+
+    @abstractmethod
     def close_position(self, account_id, contract_id, price=None) -> dict:
-        """Flatten the position at market. `price` is an optional fill hint used
-        by the backtest sim; live brokers close at market and ignore it."""
+        """Flatten the position at market AND cancel any resting bracket orders
+        for the contract (a market close doesn't fire the OCO, so the protective
+        stop/TP would otherwise orphan and could fill into a naked position).
+        `price` is an optional fill hint used by the backtest sim; live brokers
+        close at market and ignore it."""
 
 
 class BrokerClient(OrderRouter):

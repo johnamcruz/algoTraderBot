@@ -223,6 +223,14 @@ class TopstepXClient(BrokerClient):
             raise RuntimeError(f"trail modify rejected: {r.get('errorMessage', r)}")
         return r
 
+    def cancel_order(self, account_id: int, order_id: int) -> dict:
+        r = self._post("/Order/cancel", {
+            "accountId": account_id, "orderId": order_id,
+        })
+        if not r.get("success"):
+            raise RuntimeError(f"cancel rejected: {r.get('errorMessage', r)}")
+        return r
+
     def close_position(self, account_id: int, contract_id: str, price=None) -> dict:
         # Flatten the whole position at market. `price` is ignored — the broker
         # fills at market (it's only a fill hint for the backtest sim).
@@ -231,6 +239,21 @@ class TopstepXClient(BrokerClient):
         })
         if not r.get("success"):
             raise RuntimeError(f"close rejected: {r.get('errorMessage', r)}")
+        # A market close does NOT fire a bracket leg, so the OCO won't auto-cancel
+        # — sweep and cancel every resting order for this contract so the
+        # protective stop/TP can't orphan and later fill into a NAKED position.
+        try:
+            orders = self._post("/Order/searchOpen",
+                                {"accountId": account_id}).get("orders", [])
+        except Exception:
+            orders = []
+        for o in orders:
+            if (o.get("contractId") == contract_id
+                    and o.get("status", ORDER_STATUS_WORKING) == ORDER_STATUS_WORKING):
+                try:
+                    self.cancel_order(account_id, o["id"])
+                except Exception:
+                    pass            # best-effort — never fail the close itself
         return r
 
     def _post(self, path: str, payload: dict, auth: bool = True) -> dict:
