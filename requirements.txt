@@ -7,7 +7,7 @@ python-dotenv>=1.0       # load TopstepX credentials from .env
 # Model library (public GitHub). Provides the Chronos embedding (embed_bars),
 # the joblib head classes the bundles unpickle into, and the SuperTrend/ATR/ADX
 # primitives the strategies reuse. Pulls torch + chronos-forecasting transitively.
-futures_foundation @ git+https://github.com/johnamcruz/Futures-Foundation-Model.git
+futures-foundation-model @ git+https://github.com/johnamcruz/Futures-Foundation-Model.git
 # PPO trailing exit (training only — the live bot runs the policy in pure numpy).
 gymnasium>=0.29
 stable-baselines3>=2.0
