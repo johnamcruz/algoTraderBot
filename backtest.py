@@ -79,6 +79,26 @@ def _resolve_specs(symbol):
     return ts, tv
 
 
+def drive(ctx, sim, df, start_idx, window=WINDOW):
+    """The per-bar backtest loop — the EXACT live logic (bot.handle_bar) driven
+    through a SimBroker. Each bar: settle broker exits, then run the bot on a
+    trailing window. Returns the recorded trades. Shared by run_backtest and the
+    e2e tests so both exercise the same driver."""
+    import bot     # imported here to avoid a cycle (bot imports backtest lazily)
+    trade_state = None
+    for i in range(start_idx, len(df)):
+        sim.set_bar(i)
+        sim.process_exits()                 # close on stop/target, else trail
+        if sim.pos is None:
+            trade_state = None              # exited this bar
+        win = df.iloc[max(0, i - window + 1): i + 1]
+        trade_state = bot.handle_bar(ctx, win, trade_state)
+        if sim.pos is not None and trade_state and sim.pos.get("strategy") is None:
+            sim.tag_strategy(trade_state["strategy"].name)
+    sim.close_open()                        # settle any open trade at the end
+    return sim.trades
+
+
 def run_backtest(symbol="NQ", start=None, end=None):
     import bot     # imported here to avoid a cycle (bot imports backtest lazily)
 
@@ -109,17 +129,6 @@ def run_backtest(symbol="NQ", start=None, end=None):
              end or str(df["time"].iloc[-1].date()),
              len(df) - start_idx, config.PROBA_FLOOR, ctx.exit_mode)
 
-    trade_state = None
-    for i in range(start_idx, len(df)):
-        sim.set_bar(i)
-        sim.process_exits()                 # close on stop/target, else trail
-        if sim.pos is None:
-            trade_state = None              # exited this bar
-        window = df.iloc[i - WINDOW + 1: i + 1]
-        trade_state = bot.handle_bar(ctx, window, trade_state)
-        if sim.pos is not None and trade_state and sim.pos.get("strategy") is None:
-            sim.tag_strategy(trade_state["strategy"].name)
-
-    sim.close_open()                        # settle any open trade at the end
-    _summary(sim.trades, symbol)
-    return sim.trades
+    trades = drive(ctx, sim, df, start_idx)
+    _summary(trades, symbol)
+    return trades
