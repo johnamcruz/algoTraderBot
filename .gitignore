@@ -10,3 +10,6 @@ proba_cache.npz
 .env
 # macOS
 .DS_Store
+
+# 1-min bar data is >100MB/file — too large for GitHub; keep local only
+data/*_1min.csv
