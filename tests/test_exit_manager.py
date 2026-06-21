@@ -7,9 +7,9 @@ could reject and leave a winner riding back to −1R)."""
 import pandas as pd
 
 import config
-import trail_exit_env as tee
+from ppo_exit import trail_exit_env as tee
 from broker_base import POSITION_LONG
-from exit_manager import manage_trail, reconstruct_state
+from ppo_exit.exit_manager import manage_trail, reconstruct_state
 
 TICK = 0.25
 

@@ -24,7 +24,7 @@ import os
 import time
 
 import config
-import exit_manager as ex
+from ppo_exit import exit_manager as ex
 import strategies as strat
 from broker import SIDE, make_broker
 from logsetup import get_logger
@@ -50,8 +50,8 @@ def ensure_exit_policy():
                 config.TIMEFRAME_MIN, os.path.basename(path))
     import subprocess
     import sys
-    r = subprocess.run([sys.executable, os.path.join(config.HERE, "train_ppo_exit.py"),
-                        "--timeframe", str(config.TIMEFRAME_MIN)])
+    r = subprocess.run([sys.executable, "-m", "ppo_exit.train_ppo_exit",
+                        "--timeframe", str(config.TIMEFRAME_MIN)], cwd=config.HERE)
     if r.returncode != 0 or not os.path.exists(path):
         log.warning("⚠️  could not train a %d-min PPO policy — falling back to the "
                     "fixed %sR exit", config.TIMEFRAME_MIN, config.RR)
@@ -68,7 +68,7 @@ class BotContext:
 
     def __init__(self, client, account_id, contract_id, tick_size,
                  tick_value=0.0, log_candles=True):
-        import trail_exit_env as tee     # numpy-only PPO policy loader
+        from ppo_exit import trail_exit_env as tee  # numpy-only PPO policy loader
         self.client = client
         self.account_id = account_id
         self.contract_id = contract_id
@@ -262,7 +262,7 @@ def run():
 def _retrain_exit(quick: bool, timesteps: int):
     """Retrain the PPO trailing-exit policy (delegates to train_ppo_exit)."""
     import sys
-    import train_ppo_exit
+    from ppo_exit import train_ppo_exit
     sys.argv = (["train_ppo_exit.py", "--timeframe", str(config.TIMEFRAME_MIN)]
                 + (["--quick"] if quick else ["--timesteps", str(timesteps)]))
     log.info("retraining PPO exit for %d-min (%s)…", config.TIMEFRAME_MIN,
@@ -312,6 +312,7 @@ if __name__ == "__main__":
         if args.timeframe < 1:
             raise SystemExit("--timeframe must be >= 1 (minutes)")
         config.TIMEFRAME_MIN = args.timeframe
+        config.apply_exit_config()       # load this timeframe's exit shaping
     if args.strategy:
         config.ACTIVE_STRATEGIES = args.strategy
     if args.proba_floor is not None:

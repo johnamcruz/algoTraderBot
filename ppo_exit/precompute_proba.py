@@ -23,10 +23,11 @@ import pandas as pd
 
 import config
 import indicators as ind
-from trail_exit_env import build_arrays, build_catalog
+from ppo_exit.trail_exit_env import build_arrays, build_catalog
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-DATA_CSV = os.path.join(HERE, "data", "NQ_3min.csv")
+HERE = os.path.dirname(os.path.abspath(__file__))          # the ppo_exit package
+REPO = os.path.dirname(HERE)                                # repo root (data lives here)
+DATA_CSV = os.path.join(REPO, "data", "NQ_3min.csv")
 
 
 def _tf_suffix() -> str:
@@ -107,10 +108,10 @@ def grade_in_subprocess(csv_path=DATA_CSV, rows=None):
     xgboost — keeping the caller (which may hold torch/SB3) xgboost-free."""
     import subprocess
     import sys
-    cmd = [sys.executable, os.path.abspath(__file__), "--csv", csv_path]
+    cmd = [sys.executable, "-m", "ppo_exit.precompute_proba", "--csv", csv_path]
     if rows:
         cmd += ["--rows", str(rows)]
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, cwd=REPO)   # -m needs the repo root on path
 
 
 def proba_for_catalog(df, catalog, csv_path=DATA_CSV, cache=None):

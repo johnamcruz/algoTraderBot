@@ -24,8 +24,13 @@ from __future__ import annotations
 import numpy as np
 
 # Reuse the exact indicators the live bot trades on.
+import config
 import indicators as ind
-from config import ST_PERIOD, ST_MULT, STOP_ATR, ATR_P, GIVEBACK_R, ACTIVATE_R
+# ST_PERIOD/ST_MULT/ATR_P are structural (catalog + ATR periods) — bind at import.
+# STOP_ATR / ACTIVATE_R / GIVEBACK_R are the TUNED exit knobs and are read from
+# `config` at RUNTIME, so a per-timeframe exit config (config.apply_exit_config)
+# drives the training sim exactly as it drives live (exit_manager reads them too).
+from config import ST_PERIOD, ST_MULT, ATR_P
 
 # ── trade / agent constants ────────────────────────────────────────────
 MAX_HOLD = 80          # force-exit after this many bars (80 * 3min = 4h)
@@ -107,7 +112,7 @@ class TrailExitSim:
         self.i = int(entry_idx)                # last *observed* bar
         self.entry = float(self.close[entry_idx])
         # initial stop = STOP_ATR × ATR(ATR_P) — same 0.5×ATR(20) risk as live
-        self.risk = STOP_ATR * float(self.atr_stop[entry_idx])
+        self.risk = config.STOP_ATR * float(self.atr_stop[entry_idx])
         self.stop = self.entry - self.sign * self.risk
         self.bars_held = 0
         self.mfe = 0.0           # close-based, for the observation (matches live)
@@ -161,9 +166,9 @@ class TrailExitSim:
             prior_stop = self.stop
             fav = self.high[i] if s > 0 else self.low[i]
             self.peak_R = max(self.peak_R, s * (fav - self.entry) / self.risk)
-            if self.peak_R >= ACTIVATE_R:
+            if self.peak_R >= config.ACTIVATE_R:
                 cand = self.close[i] - s * mult * self.atr[i]
-                cap = (self.entry + s * self.peak_R * self.risk) - s * GIVEBACK_R * self.risk
+                cap = (self.entry + s * self.peak_R * self.risk) - s * config.GIVEBACK_R * self.risk
                 cand = max(cand, cap) if s > 0 else min(cand, cap)
                 new_stop = max(prior_stop, cand) if s > 0 else min(prior_stop, cand)
             else:

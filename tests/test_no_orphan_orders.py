@@ -14,8 +14,8 @@ import pytest
 
 import bot
 import broker
-import exit_manager
-import trail_exit_env as tee
+from ppo_exit import exit_manager
+from ppo_exit import trail_exit_env as tee
 
 SL, TP, TRAIL = 4, 1, 5          # ProjectX order types
 WORKING, FILLED, CANCELLED = 1, 2, 0

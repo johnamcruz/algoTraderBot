@@ -22,24 +22,26 @@ import os
 import numpy as np
 import pandas as pd
 
+import json
+
 import config
-import trail_exit_env as tee
-from trail_exit_env import TRAIL_MULTS, TrailExitSim, build_arrays, build_catalog
+from ppo_exit.trail_exit_env import TRAIL_MULTS, TrailExitSim, build_arrays, build_catalog
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(HERE)                                # repo root (data lives here)
 
 
 # ── data prep (per ticker) ─────────────────────────────────────────────────
 
 def _load_ticker(symbol, tf, proba_floor):
-    csv = os.path.join(HERE, "data", f"{symbol}_{tf}min.csv")
+    csv = os.path.join(REPO, "data", f"{symbol}_{tf}min.csv")
     if not os.path.exists(csv):
         raise SystemExit(f"no data file: {csv} (copy it from the FFM data dir)")
     df = pd.read_csv(csv)
     arr = build_arrays(df)
     catalog = build_catalog(arr)
     if proba_floor > 0:                       # only the flips the bot would enter
-        import precompute_proba as pp
+        from ppo_exit import precompute_proba as pp
         config.TIMEFRAME_MIN, config.SYMBOL = tf, symbol   # pick model + cache
         proba = pp.read_cache(df, catalog, csv)
         if proba is None:
@@ -89,6 +91,20 @@ def _metrics(R):
                 sumR=float(R.sum()), n=int(len(R)))
 
 
+def _save_config(tf, params):
+    """Write the winning config to exit_configs.json[<tf>], preserving other keys."""
+    path = config.EXIT_CONFIGS_PATH
+    try:
+        with open(path) as f:
+            cfgs = json.load(f)
+    except (FileNotFoundError, ValueError):
+        cfgs = {}
+    cfgs[str(tf)] = {k: round(float(params[k]), 3)
+                     for k in ("ACTIVATE_R", "GIVEBACK_R", "STOP_ATR")}
+    with open(path, "w") as f:
+        json.dump(cfgs, f, indent=2)
+
+
 def _score(datasets, which, scan_mults, objective):
     """Best-achievable metric for the current tee.* config over `which` slice.
     scan_mults: if True, take the best over all trail mults (when the cap doesn't
@@ -122,6 +138,9 @@ def main():
                          "give-back cap doesn't bind)")
     ap.add_argument("--progress", action="store_true",
                     help="show Optuna's live progress bar (off by default — noisy in logs)")
+    ap.add_argument("--save", action="store_true",
+                    help="write the winner to exit_configs.json[<timeframe>] if it "
+                         "beats the current config on the held-out test slice")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
 
@@ -136,10 +155,13 @@ def main():
         datasets.append((arr, {"val": val, "test": test}))
         print(f"   {sym}: {len(catalog)} flips | {len(val)} val | {len(test)} test")
 
+    config.apply_exit_config(args.timeframe)        # baseline = this tf's saved config
+    base_cfg = (config.ACTIVATE_R, config.GIVEBACK_R, config.STOP_ATR)
+
     def objective(trial):
-        tee.ACTIVATE_R = trial.suggest_float("ACTIVATE_R", 0.5, 4.0, step=0.25)
-        tee.GIVEBACK_R = trial.suggest_float("GIVEBACK_R", 0.25, 2.0, step=0.25)
-        tee.STOP_ATR = trial.suggest_float("STOP_ATR", 0.3, 1.2, step=0.1)
+        config.ACTIVATE_R = trial.suggest_float("ACTIVATE_R", 1.0, 3.0, step=0.25)
+        config.GIVEBACK_R = trial.suggest_float("GIVEBACK_R", 0.25, 1.5, step=0.25)
+        config.STOP_ATR = trial.suggest_float("STOP_ATR", 0.4, 1.0, step=0.1)
         return _score(datasets, "val", args.scan_mults, args.objective)
 
     study = optuna.create_study(direction="maximize",
@@ -147,14 +169,13 @@ def main():
     study.optimize(objective, n_trials=args.trials, show_progress_bar=args.progress)
 
     best = study.best_params
-    # evaluate the WINNER and the current baseline on the held-out TEST slice
-    def test_metrics(activate, giveback, stop_atr):
-        tee.ACTIVATE_R, tee.GIVEBACK_R, tee.STOP_ATR = activate, giveback, stop_atr
-        return _metrics(_pooled_R(datasets, "test",
-                                  1 if not args.scan_mults else 1))
+    best_cfg = (best["ACTIVATE_R"], best["GIVEBACK_R"], best["STOP_ATR"])
 
-    base = test_metrics(config.ACTIVATE_R, config.GIVEBACK_R, config.STOP_ATR)
-    won = test_metrics(best["ACTIVATE_R"], best["GIVEBACK_R"], best["STOP_ATR"])
+    def test_metrics(cfg):
+        config.ACTIVATE_R, config.GIVEBACK_R, config.STOP_ATR = cfg
+        return _metrics(_pooled_R(datasets, "test", 1))
+
+    base, won = test_metrics(base_cfg), test_metrics(best_cfg)
 
     def _row(tag, cfg, m):
         print(f"   {tag:<10} ACTIVATE_R={cfg[0]:.2f} GIVEBACK_R={cfg[1]:.2f} "
@@ -162,16 +183,24 @@ def main():
               f"PF={m['pf']:.2f} sumR={m['sumR']:+.1f} n={m['n']}")
 
     print(f"\n── best val {args.objective}={study.best_value:+.3f} → TEST (held out) ──")
-    _row("baseline", (config.ACTIVATE_R, config.GIVEBACK_R, config.STOP_ATR), base)
-    _row("optuna", (best["ACTIVATE_R"], best["GIVEBACK_R"], best["STOP_ATR"]), won)
+    _row("baseline", base_cfg, base)
+    _row("optuna", best_cfg, won)
 
     improved = won[args.objective] > base[args.objective]
-    print(f"\n{'✅ improves' if improved else '⚠️  no improvement on'} test "
-          f"{args.objective}. Plug into config.py:")
-    print(f"    ACTIVATE_R = {best['ACTIVATE_R']:.2f}")
-    print(f"    GIVEBACK_R = {best['GIVEBACK_R']:.2f}")
-    print(f"    STOP_ATR   = {best['STOP_ATR']:.2f}")
-    print(f"then: python train_ppo_exit.py --timeframe {args.timeframe}")
+    if args.save and improved:
+        _save_config(args.timeframe, best)
+        print(f"\n✅ saved → exit_configs.json[\"{args.timeframe}\"] (beats current on "
+              f"test {args.objective}). Retrain: python train_ppo_exit.py "
+              f"--timeframe {args.timeframe}")
+    elif args.save:
+        print(f"\n⚠️  NOT saved — best doesn't beat the current config on test "
+              f"{args.objective}.")
+    else:
+        verb = "✅ improves" if improved else "⚠️  no improvement on"
+        print(f"\n{verb} test {args.objective} — rerun with --save to write "
+              f"exit_configs.json[\"{args.timeframe}\"]:")
+        print(f"    ACTIVATE_R={best_cfg[0]:.2f} GIVEBACK_R={best_cfg[1]:.2f} "
+              f"STOP_ATR={best_cfg[2]:.2f}")
 
 
 if __name__ == "__main__":

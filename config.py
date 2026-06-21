@@ -111,7 +111,7 @@ USE_PPO_EXIT = True
 # True = broker-native trailing stop that the PPO can only *tighten* — simpler
 #   intra-bar protection, but the policy can't widen, so it mostly sits idle.
 USE_TRAILING_STOP = False
-POLICY_PATH = os.path.join(MODELS_DIR, "rl_trail_exit", "ppo_trail_exit.npz")
+POLICY_PATH = os.path.join(HERE, "ppo_exit", "policies", "ppo_trail_exit.npz")
 RR = 2.0                    # fixed-R take-profit fallback (no PPO policy)
 
 
@@ -133,3 +133,37 @@ def policy_path():
 # ride, giving back at most 0.75R from the best point.
 ACTIVATE_R = 2.0
 GIVEBACK_R = 0.75
+
+# Per-timeframe exit shaping. The best ACTIVATE_R / GIVEBACK_R / STOP_ATR differ by
+# timeframe (1-min vs 3-min), so they live in exit_configs.json keyed by minutes and
+# are applied for the active timeframe. These knobs are read at runtime by BOTH the
+# live exit (exit_manager) and the training sim (trail_exit_env), so training=live.
+# Tune with optimize_exit.py; after changing a timeframe's config, retrain its policy
+# (train_ppo_exit --timeframe N) so the PPO matches.
+EXIT_CONFIGS_PATH = os.path.join(HERE, "ppo_exit", "exit_configs.json")
+
+
+def apply_exit_config(tf=None):
+    """Apply exit_configs.json[<tf>] to ACTIVATE_R / GIVEBACK_R / STOP_ATR. No-op
+    (keeps the module defaults) if the file or the timeframe key is missing. Returns
+    the applied dict, or None."""
+    global ACTIVATE_R, GIVEBACK_R, STOP_ATR
+    import json
+    tf = TIMEFRAME_MIN if tf is None else tf
+    try:
+        with open(EXIT_CONFIGS_PATH) as f:
+            cfg = json.load(f).get(str(tf))
+    except (FileNotFoundError, ValueError):
+        return None
+    if not isinstance(cfg, dict):
+        return None
+    if "ACTIVATE_R" in cfg:
+        ACTIVATE_R = float(cfg["ACTIVATE_R"])
+    if "GIVEBACK_R" in cfg:
+        GIVEBACK_R = float(cfg["GIVEBACK_R"])
+    if "STOP_ATR" in cfg:
+        STOP_ATR = float(cfg["STOP_ATR"])
+    return {"ACTIVATE_R": ACTIVATE_R, "GIVEBACK_R": GIVEBACK_R, "STOP_ATR": STOP_ATR}
+
+
+apply_exit_config()             # apply the default timeframe's saved config at import

@@ -10,8 +10,8 @@ import logging
 import pandas as pd
 
 import bot
-import exit_manager as ex
-import trail_exit_env as tee
+from ppo_exit import exit_manager as ex
+from ppo_exit import trail_exit_env as tee
 
 
 # ── stop_fill_exit math (pure) ─────────────────────────────────────────────

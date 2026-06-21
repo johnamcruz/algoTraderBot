@@ -13,7 +13,7 @@ import pandas as pd
 import backtest
 import bot
 import config
-import trail_exit_env as tee
+from ppo_exit import trail_exit_env as tee
 from broker_base import POSITION_LONG
 from sim_broker import SimBroker
 

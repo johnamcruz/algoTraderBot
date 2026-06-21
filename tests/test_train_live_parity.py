@@ -12,8 +12,8 @@ import numpy as np
 import pandas as pd
 
 import config
-import exit_manager
-import trail_exit_env as tee
+from ppo_exit import exit_manager
+from ppo_exit import trail_exit_env as tee
 
 TICK = 0.25
 ATR_TRAIL, ATR_STOP = 1.0, 4.0          # constant ATRs → risk = STOP_ATR×ATR_STOP

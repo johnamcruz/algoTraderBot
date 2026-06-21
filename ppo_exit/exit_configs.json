@@ -1,0 +1,5 @@
+{
+  "_note": "Per-timeframe PPO exit shaping (ACTIVATE_R/GIVEBACK_R/STOP_ATR). Tune with optimize_exit.py; after changing a timeframe, retrain its policy: python train_ppo_exit.py --timeframe N (training=live).",
+  "1": {"ACTIVATE_R": 2.0, "GIVEBACK_R": 0.75, "STOP_ATR": 0.5},
+  "3": {"ACTIVATE_R": 2.0, "GIVEBACK_R": 0.75, "STOP_ATR": 0.5}
+}

@@ -4,8 +4,8 @@ the metric/split math and that the replay is actually sensitive to the config kn
 (otherwise the scan is meaningless)."""
 import numpy as np
 
-import optimize_exit as oe
-import trail_exit_env as tee
+import config
+from ppo_exit import optimize_exit as oe
 
 
 def test_metrics_basic():
@@ -39,31 +39,30 @@ def _arr(close, high, low):
 
 def test_realized_r_responds_to_giveback(monkeypatch):
     # a long that rallies to a new peak then reverses — the give-back width changes
-    # where it exits, so the scanner's objective must move with GIVEBACK_R
-    monkeypatch.setattr(tee, "STOP_ATR", 0.5)      # risk = 0.5 × atr_stop(4) = 2.0
-    monkeypatch.setattr(tee, "ACTIVATE_R", 2.0)
+    # where it exits, so the scanner's objective must move with GIVEBACK_R. The sim
+    # reads config.* at runtime (training=live), so we patch config, not the module.
+    monkeypatch.setattr(config, "STOP_ATR", 0.5)   # risk = 0.5 × atr_stop(4) = 2.0
+    monkeypatch.setattr(config, "ACTIVATE_R", 2.0)
     close = [100, 104, 106, 100]
     high = [100.5, 104.5, 106.5, 100.5]
     low = [99.5, 103.5, 105.5, 95.0]
     cat = np.array([[0, 1]])
-    monkeypatch.setattr(tee, "GIVEBACK_R", 0.5)
+    monkeypatch.setattr(config, "GIVEBACK_R", 0.5)
     tight = oe._realized_R(_arr(close, high, low), cat, action=1)[0]
-    monkeypatch.setattr(tee, "GIVEBACK_R", 1.5)
+    monkeypatch.setattr(config, "GIVEBACK_R", 1.5)
     loose = oe._realized_R(_arr(close, high, low), cat, action=1)[0]
     assert tight != loose                          # config genuinely drives the exit
 
 
 def test_realized_r_responds_to_activate(monkeypatch):
-    # below ACTIVATE_R the initial stop holds; raising it past the peak prevents the
-    # trail from ever locking in — a different outcome
-    monkeypatch.setattr(tee, "STOP_ATR", 0.5)
-    monkeypatch.setattr(tee, "GIVEBACK_R", 0.75)
+    monkeypatch.setattr(config, "STOP_ATR", 0.5)
+    monkeypatch.setattr(config, "GIVEBACK_R", 0.75)
     close = [100, 104, 100, 98]
     high = [100.5, 104.5, 100.5, 98.5]
     low = [99.5, 103.5, 99.5, 97.5]
     cat = np.array([[0, 1]])
-    monkeypatch.setattr(tee, "ACTIVATE_R", 1.0)    # activates (peak +2.25R ≥ 1)
+    monkeypatch.setattr(config, "ACTIVATE_R", 1.0)   # activates (peak +2.25R ≥ 1)
     on = oe._realized_R(_arr(close, high, low), cat, action=1)[0]
-    monkeypatch.setattr(tee, "ACTIVATE_R", 5.0)    # never activates → rides to stop
+    monkeypatch.setattr(config, "ACTIVATE_R", 5.0)   # never activates → rides to stop
     off = oe._realized_R(_arr(close, high, low), cat, action=1)[0]
     assert on != off

@@ -26,14 +26,15 @@ import os
 import numpy as np
 import pandas as pd
 
-from trail_exit_env import (
+from ppo_exit.trail_exit_env import (
     build_arrays, build_catalog, make_env, TrailExitSim,
     NumpyMlpPolicy, TRAIL_MULTS, N_ACTIONS, MAX_HOLD,
 )
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-DATA_CSV = os.path.join(HERE, "data", "NQ_3min.csv")
-RL_DIR = os.path.join(HERE, "models", "rl_trail_exit")
+HERE = os.path.dirname(os.path.abspath(__file__))          # the ppo_exit package
+REPO = os.path.dirname(HERE)                                # repo root (data lives here)
+DATA_CSV = os.path.join(REPO, "data", "NQ_3min.csv")
+RL_DIR = os.path.join(HERE, "policies")                    # trained policies live in-package
 OUT_NPZ = os.path.join(RL_DIR, "ppo_trail_exit.npz")
 SB3_ZIP = os.path.join(RL_DIR, "ppo_trail_exit_sb3.zip")
 HOLDOUT_FRAC = 0.10            # last 10% of bars, never seen in training
@@ -142,7 +143,11 @@ def main():
     args = ap.parse_args()
 
     config.TIMEFRAME_MIN = args.timeframe          # pick model/data/policy for this tf
-    csv = args.csv or os.path.join(HERE, "data", f"NQ_{args.timeframe}min.csv")
+    cfg = config.apply_exit_config()               # train on THIS timeframe's exit shaping
+    print(f"  exit config ({args.timeframe}-min): "
+          f"ACTIVATE_R={config.ACTIVATE_R} GIVEBACK_R={config.GIVEBACK_R} "
+          f"STOP_ATR={config.STOP_ATR}" + ("" if cfg else "  (defaults — no JSON entry)"))
+    csv = args.csv or os.path.join(REPO, "data", f"NQ_{args.timeframe}min.csv")
     suffix = "" if args.timeframe == config.TRAINED_TIMEFRAME_MIN else f"_{args.timeframe}min"
     out_npz = os.path.join(RL_DIR, f"ppo_trail_exit{suffix}.npz")
     sb3_zip = os.path.join(RL_DIR, f"ppo_trail_exit{suffix}_sb3.zip")
@@ -160,7 +165,7 @@ def main():
     # Grade proba with xgboost in a SUBPROCESS so this (torch/SB3) process never
     # loads xgboost — they segfault together on macOS.
     if args.proba_floor > 0:
-        import precompute_proba as pp
+        from ppo_exit import precompute_proba as pp
         proba = pp.read_cache(df, catalog, csv)
         if proba is None:
             pp.grade_in_subprocess(csv, rows=(60_000 if args.quick else None))
