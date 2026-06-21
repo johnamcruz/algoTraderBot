@@ -13,3 +13,5 @@ gymnasium>=0.29
 stable-baselines3>=2.0
 # Tests (pytest tests/) — unit + e2e, no network/broker/Chronos needed.
 pytest>=7.0
+# Exit-config search (optimize_exit.py) — Optuna scan over ACTIVATE_R/GIVEBACK_R/STOP_ATR.
+optuna>=3.0

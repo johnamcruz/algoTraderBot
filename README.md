@@ -335,6 +335,24 @@ exit is strategy-agnostic (it only sees the trade's R-state), so the same policy
 serves every strategy. The printed holdout table is the source of truth for
 current performance.
 
+### Tune the exit config (Optuna)
+
+The exit's behaviour is set by `ACTIVATE_R` / `GIVEBACK_R` / `STOP_ATR` — and the
+PPO trail collapses to that give-back cap, so the config *is* the lever. Search it:
+
+```bash
+python optimize_exit.py --timeframe 3 --tickers NQ --trials 200
+python optimize_exit.py --timeframe 1 --tickers NQ ES RTY YM GC --trials 300
+```
+
+It replays the exact give-back sim (`TrailExitSim`) per config — no PPO retrain per
+trial — scoring expectancy on a **validation** slice and reporting the winner on a
+held-out **test** slice, so the chosen config isn't overfit to one window. Pool
+multiple tickers with `--tickers` for more data. It prints the best
+`ACTIVATE_R`/`GIVEBACK_R`/`STOP_ATR` (and whether it beats the current config on
+test); paste them into `config.py`, then retrain with
+`train_ppo_exit --timeframe <tf>`. (1-min CSVs are local-only — see Backtest.)
+
 ## Tests
 
 ```bash
