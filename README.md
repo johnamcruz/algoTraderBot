@@ -94,6 +94,43 @@ several — when more than one fires on a bar, the highest-proba signal wins):
 | `bos` | break of the last confirmed swing (break of structure) |
 | `orb` | 15-min opening-range breakout (09:30 ET), gated to ADX ≥ 18 |
 | `cisd_ote` | CISD displacement → OTE fib-zone pullback (mean-reversion, ICT/SMC) |
+| `jev` | **a reasoning model is the strategy:** each flat bar it reads every other strategy's view, live signal and track record and decides long / short / none (opt-in; swappable model) |
+
+**Jev** (`--strategy jev`, opt-in, never the default) — a reasoning model *is* the
+strategy, and the other six are its evidence. On every flat bar it receives:
+
+- every strategy's **view** of the market (SuperTrend bias, EMA spread, Keltner
+  position, swing levels, opening range, CISD zone + 1h trend, whether each gate is open),
+- the **signal** of any strategy that fired on this bar, with that strategy's own
+  model win-probability,
+- every strategy's **track record** — each signal it fires (taken or not) is followed
+  to +2R / its stop / 20 bars, so the model sees which setups are working *right now*
+  (seeded from history at startup, strictly causal),
+- market context (ADX, volatility, session, recent path) and its own recent picks.
+
+All in ATR units — no prices or dates, so a backtest can't leak hindsight. It answers
+`long`, `short` or `none`; **its decision is the entry** (no `--proba-floor`), with the
+standard `STOP_ATR × ATR` stop, and the PPO exit manages it like any other trade.
+Logs and backtest breakdowns show `jev:long` / `jev:short`.
+
+The model is swappable via `JEV_DECIDER` (`.env`) as `backend:model`:
+
+| decider | runs |
+|---|---|
+| `jev:jev-latest` (default) | TypeSafe's hosted Jev — needs `TYPESAFE_AI_API_KEY` |
+| `mlx:mlx-community/Qwen3-0.6B-4bit` | locally in-process on Apple silicon (`pip install mlx-lm`) |
+| `openai:<model>` | any OpenAI-compatible server at `JEV_OPENAI_URL` (Ollama, LM Studio, `mlx_lm.server`, llama.cpp) |
+
+```bash
+# e.g. a local Qwen served by mlx_lm.server, thinking off for speed
+mlx_lm.server --model mlx-community/Qwen3-0.6B-4bit --port 8080
+JEV_DECIDER=openai:mlx-community/Qwen3-0.6B-4bit JEV_OPENAI_URL=http://localhost:8080/v1 \
+JEV_LLM_THINK=0 python bot.py --backtest --symbol NQ --strategy jev --start 2026-06-03 --end 2026-06-04
+```
+
+Adding a model = subclass `Decider` in `strategies/jev/deciders.py` and register it.
+Decisions are cached in `log/jev_cache.jsonl`, so re-running a backtest makes no
+model calls. A failed or timed-out call stays flat for that bar.
 
 **Timeframe** (`--timeframe MIN`, default 3): the bar interval. Models are
 per-timeframe and there is **no cross-timeframe fallback** — only strategies with a

@@ -45,7 +45,9 @@ def test_all_strategies_have_3min_models():
 
 def test_1min_allows_supertrend_only():
     config.TIMEFRAME_MIN = 1
-    assert strategies.available_for_timeframe() == ["supertrend"]
+    # jev is a meta-strategy: available whenever any sub-strategy has a model
+    assert strategies.available_for_timeframe() == ["supertrend", "jev"]
+    assert [s.name for s in strategies.make_strategies(["jev"])[0].subs] == ["supertrend"]
     built = strategies.make_strategies(["supertrend"])
     assert len(built) == 1 and built[0].name == "supertrend"
 

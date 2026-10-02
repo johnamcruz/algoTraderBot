@@ -3,8 +3,8 @@
 bot.py — multi-strategy TopstepX AI bot with a PPO trailing exit.
 
 Each bar:  every active strategy detects its mechanical entry  →  grades it with
-its own Chronos+XGBoost model  →  the best graded signal (proba ≥ floor) is
-taken  →  the PPO policy trails the stop until exit.
+its own Chronos+XGBoost model  →  the best accepted signal (proba ≥ floor, or
+Jev's pick for the jev strategy) is taken  →  the PPO policy trails the stop until exit.
 
     detect (SuperTrend flip / EMA cross)  →  model grades  →  enter  →  PPO trail
 
@@ -170,10 +170,10 @@ def handle_bar(ctx: BotContext, bars, trade_state):
         for s, sig in fired:
             sig.proba, sig.r_hat = s.grade(bars, sig, emb=emb)
             side_txt = "LONG" if sig.direction > 0 else "SHORT"
-            take = sig.proba >= config.PROBA_FLOOR
+            take = s.accepts(sig)
             log.info("signal %s [%s] %s | proba=%.3f r_hat=%.2f | %s", stamp,
                      s.name, side_txt, sig.proba, sig.r_hat,
-                     "TAKE" if take else f"skip (<{config.PROBA_FLOOR})")
+                     "TAKE" if take else f"skip ({s.skip_reason})")
             if take:
                 candidates.append((s, sig))
 

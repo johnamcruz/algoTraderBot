@@ -97,6 +97,35 @@ ORB_CLOSE_MIN = 16 * 60   # stop firing ORB breakouts at 16:00 ET — the openin
 #   stale by the evening; gate entries to the RTH session [~09:45, 16:00) ET so
 #   the bot doesn't take low-quality overnight breakouts on the morning range.
 
+# Jev strategy (strategies/jev): a reasoning model IS the strategy. On every flat
+# bar it reads all the other strategies' views, live signals and track records and
+# decides long / short / none. Its decision IS the entry — PROBA_FLOOR does not apply.
+#
+# The decider is swappable — "backend:model" here or JEV_DECIDER in .env:
+#   jev:jev-latest                       TypeSafe's hosted Jev (needs TYPESAFE_AI_API_KEY)
+#   mlx:mlx-community/Qwen3-0.6B-4bit    local model in-process on Apple silicon (mlx-lm)
+#   openai:qwen3:4b                      any OpenAI-compatible server (Ollama, LM Studio,
+#                                        mlx_lm.server, llama.cpp) at JEV_OPENAI_URL
+JEV_DECIDER = os.environ.get("JEV_DECIDER", "jev:jev-latest")
+TYPESAFE_AI_API_KEY = os.environ.get("TYPESAFE_AI_API_KEY", "")
+JEV_API_BASE = "https://api.typesafe.ai/v1"
+JEV_OPENAI_URL = os.environ.get("JEV_OPENAI_URL", "http://localhost:11434/v1")
+JEV_OPENAI_KEY = os.environ.get("JEV_OPENAI_KEY", "")
+JEV_LLM_THINK = os.environ.get("JEV_LLM_THINK", "1") != "0"   # chat models: reason
+#                             before answering (0 = off; faster, for tiny models)
+JEV_LLM_MAX_TOKENS = 2048   # chat models: reasoning + answer budget
+JEV_TIMEOUT = 120.0         # seconds per decision; a timeout skips the bar
+JEV_STRATEGIES = []         # strategies Jev listens to; [] = every one with a
+#                             model for the active timeframe
+JEV_CACHE_PATH = os.path.join(HERE, "log", "jev_cache.jsonl")   # identical
+#   requests are answered from here, so re-running a backtest makes no calls
+# Track record (strategies/jev/memory.py): every strategy signal is followed until
+# +TARGET_R, its stop, or MAX_BARS; Jev sees each strategy's last KEEP outcomes.
+JEV_MEMORY_TARGET_R = 2.0
+JEV_MEMORY_MAX_BARS = 20
+JEV_MEMORY_KEEP = 20
+JEV_MEMORY_BOOT_BARS = 400  # history replayed at startup to seed the record
+
 # ── models ─────────────────────────────────────────────────────────────
 MODELS_DIR = os.path.join(HERE, "models")
 FFM_COLUMNS_PATH = os.path.join(MODELS_DIR, "ffm_feature_columns.json")

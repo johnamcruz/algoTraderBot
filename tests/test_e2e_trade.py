@@ -45,6 +45,11 @@ class FakeStrategy:
     def grade(self, bars, sig, emb=None):
         return self.proba, 5.0
 
+    def accepts(self, sig):
+        return sig.proba >= config.PROBA_FLOOR
+
+    skip_reason = "<floor"
+
 
 def _df(closes, lead=2.0):
     """Bars from a close series; highs/lows offset so ATR is finite. `lead` is how

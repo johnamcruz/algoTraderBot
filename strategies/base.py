@@ -141,6 +141,14 @@ class Strategy(ABC):
         r_hat = float(risk_head.predict(X)[0]) if risk_head is not None else 0.0
         return proba, r_hat
 
+    def accepts(self, sig: Signal) -> bool:
+        """Whether to take a graded signal: its model proba clears PROBA_FLOOR."""
+        return sig.proba >= config.PROBA_FLOOR
+
+    @property
+    def skip_reason(self) -> str:
+        return f"<{config.PROBA_FLOOR}"
+
     def model_path(self) -> str:
         """The model bundle for the active timeframe. The trained default (3-min)
         uses the plain filename; any other timeframe REQUIRES a `_<tf>min` variant
@@ -159,12 +167,34 @@ class Strategy(ABC):
 
     def _load_bundle(self) -> dict:
         if self._bundle is None:
-            # Importing the pipeline subpackage installs the legacy 'pipelines.chronos'
-            # pickle-compat alias so older bundles unpickle without their origin repo.
-            # (chronos was renamed to pipeline — fall back to the old name.)
-            try:
-                import futures_foundation.pipeline  # noqa: F401
-            except ModuleNotFoundError:
-                import futures_foundation.chronos    # noqa: F401
-            self._bundle = joblib.load(self.model_path())
+            self._bundle = load_bundle(self.model_path())
         return self._bundle
+
+
+# Module paths the shipped bundles were pickled under before futures_foundation
+# renamed chronos → pipeline (and dropped its own compat aliases, 2026-06-23).
+_LEGACY_PATHS = ("futures_foundation.chronos", "pipelines", "pipelines.chronos")
+
+
+def load_bundle(path: str) -> dict:
+    """joblib.load a model bundle, mapping the legacy module paths onto
+    futures_foundation.pipeline for THIS load only — the aliases are removed
+    afterwards so they never shadow another package of the same name."""
+    import sys
+    try:
+        import futures_foundation.pipeline as pipe
+        import futures_foundation.pipeline.head_xgb as head_xgb
+    except ModuleNotFoundError:          # pre-rename library: old paths are real
+        import futures_foundation.chronos  # noqa: F401
+        return joblib.load(path)
+    alias = {}
+    for legacy in _LEGACY_PATHS:
+        alias[legacy] = pipe
+        alias[f"{legacy}.head_xgb"] = head_xgb
+    added = [k for k in alias if k not in sys.modules]
+    sys.modules.update({k: alias[k] for k in added})
+    try:
+        return joblib.load(path)
+    finally:
+        for k in added:
+            sys.modules.pop(k, None)

@@ -33,6 +33,7 @@ class CisdOteStrategy(Strategy):
     def __init__(self):
         super().__init__()
         self._ctx = None        # per-detect cache for _hand_features (set in detect)
+        self.last_pipeline = None   # last detect()'s pipeline output (read by jev)
 
     # not used — detect() is overridden (zone-based, not a last-bar indicator flip)
     def _fired(self, bars):
@@ -62,9 +63,10 @@ class CisdOteStrategy(Strategy):
         return atr, hour, htf_sign, htf_str, recs
 
     def detect(self, bars: pd.DataFrame):
+        self.last_pipeline = None
         if len(bars) < cod.CTX + cod.ATR_P + 5:
             return None
-        atr, hour, htf_sign, htf_str, recs = self._pipeline(bars)
+        atr, hour, htf_sign, htf_str, recs = self.last_pipeline = self._pipeline(bars)
         last = len(bars) - 1
         # the signal whose entry executes on the just-closed bar (sig_bar = last−1)
         rec = next((r for r in reversed(recs) if r["exec_idx"] == last), None)
