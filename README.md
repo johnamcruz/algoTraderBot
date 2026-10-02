@@ -290,6 +290,7 @@ each flat bar ─► all six strategies run together (detect + their views)
 | each strategy's **track record** | how its recent signals *actually played out* in this market — every signal it fires (taken or not) is followed to +2R / its stop / 20 bars; Jev sees the win rate, average R and last outcomes (e.g. `L W L W`) |
 | **context** | the full 76-feature set every strategy model sees: bar shape, returns, volume, volatility, session, structure, liquidity sweeps, higher-timeframe trend |
 | **market** + **yourRecentPicks** | ADX, volatility, session, recent path — and how Jev's own recent picks went |
+| **recentDecisions** | its last `JEV_HISTORY_KEEP` (8) decisions as worked examples: the situation (session, ADX, SuperTrend/EMA bias, 1h trend, recent move), every candidate, what it chose, and how **every** candidate turned out — so a skipped loser or a missed winner is visible (`pending` until it really resolves) |
 
 So Jev can reason like: *"bos fired long, but bos has been stopped out 6 of its last 8
 times, SuperTrend and EMA both read down and the 1h trend is down — take none"*, or
@@ -313,7 +314,8 @@ but with low model win probability (0.36) and a negative average return…
 - **While a trade is open** the bot only manages the exit, so the strategies aren't
   evaluated live; on the next flat bar Jev replays every missed bar in order, so the
   track records never lose a signal. At startup the last `JEV_MEMORY_BOOT_BARS` (400)
-  bars are replayed to seed them.
+  bars are replayed to seed them. The decision history starts empty on each run
+  (past decisions need the model, so they aren't replayed).
 - **Decisions are cached** in `log/jev_cache.jsonl`: re-running a backtest makes no
   model calls.
 
@@ -325,7 +327,8 @@ over several weeks before trading it.
 
 Knobs (`config.py`): `JEV_DECIDER`, `JEV_STRATEGIES` (the panel; `[]` = all with a
 model for the timeframe), `JEV_MEMORY_TARGET_R` / `JEV_MEMORY_MAX_BARS` /
-`JEV_MEMORY_KEEP` (track record), `JEV_LLM_THINK` / `JEV_LLM_MAX_TOKENS` (chat
+`JEV_MEMORY_KEEP` (track record), `JEV_HISTORY_KEEP` (past decisions fed back),
+`JEV_LLM_THINK` / `JEV_LLM_MAX_TOKENS` (chat
 models), `JEV_TIMEOUT`.
 
 ### Order safety (live)

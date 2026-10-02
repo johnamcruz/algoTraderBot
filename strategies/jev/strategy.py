@@ -12,7 +12,7 @@ keltner, bos, orb, cisd_ote) fire, using everything they know:
   grade()   grades each fired signal with its own Chronos+XGBoost model (on the
             shared per-bar embedding), builds the state (EVERY strategy's view,
             live signal and track record + market context + the decider's own
-            recent picks) and asks the decider which fired entry to take, or none.
+            recent picks + its last few decisions as worked examples) and asks the decider which fired entry to take, or none.
             The pick's own Signal (side, entry, stop) becomes the trade.
   accepts() the decision IS the entry — no PROBA_FLOOR. A pick enters; none, or
             a failed call, stays flat.
@@ -32,8 +32,8 @@ import config
 from logsetup import get_logger
 from strategies.base import Strategy, embed_context
 from strategies.jev.deciders import DeciderError, make_decider
-from strategies.jev.memory import JEV, TrackRecord
-from strategies.jev.state import build_question, build_state
+from strategies.jev.memory import JEV, DecisionLog, TrackRecord
+from strategies.jev.state import NONE, build_question, build_state, situation
 
 log = get_logger()
 
@@ -49,6 +49,8 @@ class JevStrategy(Strategy):
         self._subs = subs
         self._decider = decider
         self.memory = memory or TrackRecord()
+        self.history = DecisionLog()   # its last few decisions + how they turned out
+        self._fired_tr = {}         # name → shadow trade of this bar's fired signals
         self._fired_now = []        # [(strategy, Signal)] fired on the current bar
         self._decided = False       # did the decider choose long/short this bar
 
@@ -107,12 +109,13 @@ class JevStrategy(Strategy):
             newer = np.nonzero((times > last).to_numpy())[0]
             start = max(int(newer[0]), MIN_BARS) if len(newer) else n
         fired = []
+        self._fired_tr = {}
         for k in range(start, n):
             view = bars if k == n - 1 else bars.iloc[:k + 1]
             self.memory.update(bars.iloc[k])
             fired = [(s, sig) for s in self.subs if (sig := s.detect(view))]
-            for s, sig in fired:
-                self.memory.add(s.name, sig, times.iloc[k])
+            self._fired_tr = {s.name: self.memory.add(s.name, sig, times.iloc[k])
+                              for s, sig in fired}
         if start >= n:              # current bar already folded (re-called) — just detect
             fired = [(s, sig) for s in self.subs if (sig := s.detect(bars))]
         return fired
@@ -137,10 +140,12 @@ class JevStrategy(Strategy):
         sigs = " ".join(f"{n}({'L' if x.direction > 0 else 'S'} {x.proba:.2f})"
                         for n, x in fired.items())
 
+        now = bars["time"].iloc[-1]
+        state = build_state(bars, self.subs, fired, self.memory,
+                            history=self.history.render(now))
         try:
             ans = self.decider.decide(
-                build_state(bars, self.subs, fired, self.memory),
-                build_question(fired, [s.name for s in self.subs]))
+                state, build_question(fired, [s.name for s in self.subs]))
         except DeciderError as e:
             log.warning("⚠️  jev %s | %s | no decision, staying flat: %s", stamp, sigs, e)
             return 0.0, 0.0
@@ -150,6 +155,10 @@ class JevStrategy(Strategy):
         log.info("jev %s | %s → %s (p=%.2f)%s", stamp, sigs, pick, p,
                  f" | {ans['reason']}" if ans.get("reason") else "")
         chosen = fired.get(pick)
+        self.history.add(now, situation(state), {
+            n: ("long" if x.direction > 0 else "short", round(x.proba, 2),
+                self._fired_tr.get(n)) for n, x in fired.items()},
+            pick if chosen is not None else NONE)
         if chosen is None:          # none (or an option that wasn't offered)
             return 0.0, 0.0
 

@@ -245,8 +245,9 @@ def test_question_offers_fired_entries_plus_none_with_full_playbook():
 class _Sub:
     """A fake sub-strategy that fires on chosen bar indices."""
 
-    def __init__(self, name, fire_at=(), direction=1, proba=0.5):
+    def __init__(self, name, fire_at=(), direction=1, proba=0.5, risk=2.0):
         self.name, self.fire_at, self.d, self.proba = name, set(fire_at), direction, proba
+        self.risk = risk
         self.graded = 0
 
     def has_model(self):
@@ -257,7 +258,7 @@ class _Sub:
         if i not in self.fire_at and (i - len(bars)) not in self.fire_at:
             return None
         e = float(bars["close"].iloc[-1])
-        return Signal(self.name, self.d, e, e - self.d * 2.0, 2.0, i,
+        return Signal(self.name, self.d, e, e - self.d * self.risk, self.risk, i,
                       bars["time"].iloc[-1])
 
     def grade(self, bars, sig, emb=None):
@@ -405,3 +406,49 @@ def test_state_carries_ffm_context_and_named_setup():
     setup = st["strategies"]["ema"]["signal"]["setup"]
     assert list(setup) == ["ema_spread_atr", "slow_slope_atr", "price_vs_slow_atr",
                            "adx_div100", "adx_slope_div100"]
+
+
+# ── recent decisions fed back as worked examples ────────────────────────────
+
+def test_recent_decisions_are_fed_back_with_causal_outcomes():
+    """Each decision is fed into the NEXT decision's state: the situation, the
+    candidates, the choice, and every candidate's outcome — `pending` until the
+    shadow trade has actually resolved."""
+    bars = _bars(300)
+    a = _Sub("a", fire_at={-1}, direction=1, risk=500.0)   # won't resolve by itself
+    dec = _Decider("none")
+    j = JevStrategy(subs=[a], decider=dec)
+
+    _run(j, bars.iloc[:250])                       # decision 1: skip a's long
+    first_state = dec.calls[0][0]
+    assert first_state["recentDecisions"] == []    # nothing before the first
+
+    _run(j, bars.iloc[:251])                       # decision 2, one bar later
+    past = dec.calls[1][0]["recentDecisions"]
+    assert len(past) == 1
+    d = past[0]
+    assert d["minutesAgo"] == 3 and d["yourChoice"] == "none"
+    assert d["candidates"]["a"] == {"side": "long", "modelWinProb": 0.5,
+                                    "outcome": "pending"}   # not resolved yet
+    assert d["result"] == "took none; skipped: a pending"
+    assert {"session", "adx", "last20Atr"} <= set(d["situation"])
+    assert "2026" not in json.dumps(past)          # relative times only
+
+    # once the skipped signal's shadow trade resolves, the outcome appears
+    j.memory._close(j.history.entries[0]["candidates"]["a"][2], -1.0)
+    _run(j, bars.iloc[:252])
+    assert dec.calls[2][0]["recentDecisions"][0]["result"] == \
+        "took none; skipped: a L -1.0R"
+
+
+def test_decision_log_shows_the_taken_outcome_and_keeps_the_last_n():
+    config.JEV_HISTORY_KEEP = 3
+    bars = _bars(300)
+    dec = _Decider("a")
+    j = JevStrategy(subs=[_Sub("a", fire_at={-1})], decider=dec)
+    for k in range(240, 245):
+        _run(j, bars.iloc[:k])
+    j.memory._close(j.history.entries[-1]["candidates"]["a"][2], 2.0)
+    past = j.history.render(bars["time"].iloc[260])
+    assert len(past) == 3                          # only the last JEV_HISTORY_KEEP
+    assert past[-1]["result"] == "took a: W +2.0R"

@@ -9,7 +9,7 @@ contributing
   • its TRACK RECORD — how its recent signals actually played out (memory.py),
   • for a fired signal, the named SETUP features its model scored it with.
 Plus shared market context, the full 76-feature FFM context every strategy model
-sees, and Jev's own recent picks.
+sees, Jev's own recent picks, and its last few decisions as worked examples.
 
 Everything is RELATIVE (ATR units vs the current close, time of day) — no absolute
 prices and no dates, so Jev can't recognise a historical session and leak
@@ -191,10 +191,12 @@ VIEWS = {"supertrend": _view_supertrend, "ema": _view_ema,
          "cisd_ote": _view_cisd_ote}
 
 
-def build_state(bars: pd.DataFrame, subs, fired: dict, memory) -> dict:
+def build_state(bars: pd.DataFrame, subs, fired: dict, memory,
+                history=None) -> dict:
     """Jev's view of the last closed bar. `subs` = the strategies Jev listens to,
     `fired` = {name: graded Signal} for those that fired on this bar, `memory` =
-    the TrackRecord of every strategy's recent signals and Jev's own picks."""
+    the TrackRecord of every strategy's recent signals and Jev's own picks,
+    `history` = its recent decisions rendered by DecisionLog (oldest → newest)."""
     c = bars["close"].to_numpy(float)
     v = bars["volume"].to_numpy(float)
     i = len(c) - 1
@@ -245,7 +247,21 @@ def build_state(bars: pd.DataFrame, subs, fired: dict, memory) -> dict:
         "context": ffm_context(bars, i),
         "strategies": strategies,
         "yourRecentPicks": memory.summary(JEV),
+        "recentDecisions": history or [],
     }
+
+
+def situation(state: dict) -> dict:
+    """A compact snapshot of a decision's market, kept in the decision log."""
+    m, st = state["market"], state["strategies"]
+    out = {"session": m["session"], "adx": m["adx"],
+           "last20Atr": m["returnsAtr"]["last20"]}
+    for name in ("supertrend", "ema"):
+        if name in st:
+            out[f"{name}Bias"] = st[name]["view"].get("bias")
+    if "cisd_ote" in st:
+        out["htfTrend"] = st["cisd_ote"]["view"].get("htfTrend")
+    return out
 
 
 def build_question(fired: dict, panel) -> dict:

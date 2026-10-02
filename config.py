@@ -125,6 +125,8 @@ JEV_MEMORY_TARGET_R = 2.0
 JEV_MEMORY_MAX_BARS = 20
 JEV_MEMORY_KEEP = 20
 JEV_MEMORY_BOOT_BARS = 400  # history replayed at startup to seed the record
+JEV_HISTORY_KEEP = 8        # past decisions shown as worked examples (situation →
+#                             choice → how every candidate turned out)
 
 # ── models ─────────────────────────────────────────────────────────────
 MODELS_DIR = os.path.join(HERE, "models")
