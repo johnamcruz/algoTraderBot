@@ -1,39 +1,44 @@
 #!/usr/bin/env python3
-"""strategies/jev/strategy.py — a reasoning model decides which entry to take.
+"""strategies/jev/strategy.py — a reasoning model IS the strategy.
 
-The decider (config.JEV_DECIDER — Jev by default, any model behind the Decider
-interface) chooses among the entries the other strategies (supertrend, ema,
-keltner, bos, orb, cisd_ote) fire, using everything they know:
+On every flat bar the decider (config.JEV_DECIDER — Jev by default, any model
+behind the Decider interface) decides long / short / none BY ITSELF. The six
+mechanical strategies (supertrend, ema, keltner, bos, orb, cisd_ote) never trade;
+they are its context:
 
-  detect()  folds every newly closed bar into the track record (each strategy's
-            signals followed to +2R / stop — see memory.py) and runs every
-            sub-strategy's detect() on the current bar. Nothing fired → no
-            decision this bar.
+  detect()  once per new bar: folds every newly closed bar into the track record
+            (each strategy's signals followed to +2R / stop — see memory.py) and
+            runs every strategy's detect() so their signals are known. A bar
+            already decided is never decided again.
   grade()   grades each fired signal with its own Chronos+XGBoost model (on the
-            shared per-bar embedding), builds the state (EVERY strategy's view,
-            live signal and track record + market context + the decider's own
-            recent picks + its last few decisions as worked examples) and asks the decider which fired entry to take, or none.
-            The pick's own Signal (side, entry, stop) becomes the trade.
-  accepts() the decision IS the entry — no PROBA_FLOOR. A pick enters; none, or
-            a failed call, stays flat.
+            shared per-bar embedding), builds the consolidated state (market
+            context; every strategy's view, signal and track record; its own
+            recent picks and last JEV_HISTORY_KEEP decisions) and asks the
+            decider: long, short, or none.
+  accepts() the decision IS the entry — no PROBA_FLOOR. long/short enters at the
+            close with the bot's standard STOP_ATR × ATR stop (what the PPO exit
+            is trained on); none, a failed call, or (live) a decision slower than
+            JEV_MAX_DECISION_SEC stays flat.
 
-proba on the Signal = the decider's probability for its pick (informational).
-While a pick is live the instance's `name` reads `jev:<strategy>`, so the bot's
-logs and the backtest breakdown show which entry was taken. Entry, sizing,
-broker and the PPO exit are the bot's own — nothing decider-specific.
+proba on the Signal = the decider's probability for its choice (informational).
+While a trade is live the instance's `name` reads `jev:long` / `jev:short`.
+Entry, sizing, broker and the PPO exit are the bot's own.
 """
 from __future__ import annotations
 
 import dataclasses
+import time
 
 import numpy as np
 
 import config
+import indicators as ind
 from logsetup import get_logger
-from strategies.base import Strategy, embed_context
+from strategies.base import Signal, Strategy, embed_context
 from strategies.jev.deciders import DeciderError, make_decider
 from strategies.jev.memory import JEV, DecisionLog, TrackRecord
-from strategies.jev.state import NONE, build_question, build_state, situation
+from strategies.jev.state import (LONG, NONE, SHORT, build_question, build_state,
+                                  situation)
 
 log = get_logger()
 
@@ -50,18 +55,23 @@ class JevStrategy(Strategy):
         self._decider = decider
         self.memory = memory or TrackRecord()
         self.history = DecisionLog()   # its last few decisions + how they turned out
-        self._fired_tr = {}         # name → shadow trade of this bar's fired signals
         self._fired_now = []        # [(strategy, Signal)] fired on the current bar
         self._decided = False       # did the decider choose long/short this bar
+        self._last_bar = None       # time of the last bar handled by detect()
+        self._t0 = 0.0              # when this bar's work started (decision deadline)
 
     @property
     def subs(self):
-        """Strategies Jev listens to (config.JEV_STRATEGIES, default: all) — only
-        those with a model for the active timeframe."""
+        """Strategies whose context Jev gets (config.JEV_STRATEGIES, default:
+        all) — only those with a model for the active timeframe."""
         if self._subs is None:
             import strategies       # late: the package registers this class
-            names = config.JEV_STRATEGIES or [
-                n for n in strategies.REGISTRY if n != JevStrategy.name]
+            names = [n for n in (config.JEV_STRATEGIES or strategies.REGISTRY)
+                     if n != JevStrategy.name]
+            unknown = [n for n in names if n not in strategies.REGISTRY]
+            if unknown:
+                raise SystemExit(f"JEV_STRATEGIES has unknown strategies {unknown} "
+                                 f"(have {list(strategies.REGISTRY)})")
             self._subs = [s for s in (strategies.REGISTRY[n]() for n in names)
                           if s.has_model()]
         return self._subs
@@ -72,6 +82,18 @@ class JevStrategy(Strategy):
             self._decider = make_decider()
             log.info("jev decider: %s", self._decider.spec)
         return self._decider
+
+    def prepare(self):
+        """Fail fast at startup — not on the first signal mid-session — if the
+        decider is misconfigured (unknown backend, missing key or package)."""
+        self.decider.check()
+
+    def reset(self):
+        """New contract (roll): old-contract shadow trades would be scored against
+        new-contract prices, so start the record and decision log over."""
+        self.memory = TrackRecord()
+        self.history = DecisionLog()
+        self._last_bar = None
 
     def has_model(self) -> bool:
         return bool(self.subs)
@@ -84,7 +106,7 @@ class JevStrategy(Strategy):
 
     @property
     def skip_reason(self) -> str:
-        return "jev: no pick"
+        return "jev: none"
 
     # base's indicator-flip hooks don't apply — detect()/grade() are overridden
     def _fired(self, bars):
@@ -101,71 +123,101 @@ class JevStrategy(Strategy):
         bot was in a position (detect only runs when flat). Returns the signals
         fired on the CURRENT (last) bar."""
         times = bars["time"]
+        closes = bars["close"].to_numpy(float)
+        atr = ind.atr(bars, config.ATR_P)
         n = len(bars)
         last = self.memory.last_time
         if last is None:
             start = max(MIN_BARS, n - config.JEV_MEMORY_BOOT_BARS)
         else:
             newer = np.nonzero((times > last).to_numpy())[0]
-            start = max(int(newer[0]), MIN_BARS) if len(newer) else n
+            start = int(newer[0]) if len(newer) else n
         fired = []
-        self._fired_tr = {}
         for k in range(start, n):
+            self.memory.update(bars.iloc[k])          # every unseen bar is scored
+            if k < MIN_BARS:
+                continue                              # too early to detect on
             view = bars if k == n - 1 else bars.iloc[:k + 1]
-            self.memory.update(bars.iloc[k])
             fired = [(s, sig) for s in self.subs if (sig := s.detect(view))]
-            self._fired_tr = {s.name: self.memory.add(s.name, sig, times.iloc[k])
-                              for s, sig in fired}
-        if start >= n:              # current bar already folded (re-called) — just detect
-            fired = [(s, sig) for s in self.subs if (sig := s.detect(bars))]
-        return fired
+            # shadow-trade at the price the bot would actually fill (this bar's
+            # close) with the signal's stop distance — cisd_ote's signal entry is
+            # the bar's open, but a live entry fills at the close
+            for s, sig in fired:
+                self.memory.add(s.name, dataclasses.replace(sig, entry=float(closes[k])),
+                                times.iloc[k], atr=float(atr[k]))
+        return fired if start <= n - 1 else []
 
     # ── per-bar decision ────────────────────────────────────────────────────
     def detect(self, bars):
         self.name = JevStrategy.name
         self._decided = False
+        self._t0 = time.monotonic()
+        now = bars["time"].iloc[-1]
+        if self._last_bar is not None and now <= self._last_bar:
+            return None             # this bar was already decided — never re-ask
+        self._last_bar = now
         self._fired_now = self._scan(bars)
-        if not self._fired_now:
+        if config.JEV_ONLY_ON_SIGNALS and not self._fired_now:
             return None
-        # placeholder — grade() asks the decider which fired entry to take
-        return dataclasses.replace(self._fired_now[0][1], strategy=self.name)
+        i = len(bars) - 1
+        a = float(ind.atr(bars, config.ATR_P)[i])
+        if not np.isfinite(a) or a <= 0:
+            return None
+        entry = float(bars["close"].iloc[i])
+        risk = config.STOP_ATR * a
+        # placeholder (long) — grade() asks the decider and sets the real side
+        return Signal(self.name, 1, entry, entry - risk, risk, i, now)
 
     def grade(self, bars, sig, emb=None):
-        if emb is None:
+        if self._fired_now and emb is None:
             emb = embed_context(bars, len(bars) - 1)
         for s, sub in self._fired_now:
             sub.proba, sub.r_hat = s.grade(bars, sub, emb=emb)
         fired = {s.name: sub for s, sub in self._fired_now}
-        stamp = bars["time"].iloc[-1].strftime("%Y-%m-%d %H:%M")
-        sigs = " ".join(f"{n}({'L' if x.direction > 0 else 'S'} {x.proba:.2f})"
-                        for n, x in fired.items())
-
         now = bars["time"].iloc[-1]
+        stamp = now.strftime("%Y-%m-%d %H:%M")
+        signals = [f"{n} {'long' if x.direction > 0 else 'short'}"
+                   for n, x in fired.items()]
+        seen = ", ".join(signals) or "no signals"
+
         state = build_state(bars, self.subs, fired, self.memory,
                             history=self.history.render(now))
         try:
-            ans = self.decider.decide(
-                state, build_question(fired, [s.name for s in self.subs]))
+            ans = self.decider.decide(state, build_question([s.name for s in self.subs]))
         except DeciderError as e:
-            log.warning("⚠️  jev %s | %s | no decision, staying flat: %s", stamp, sigs, e)
+            log.warning("⚠️  jev %s | %s | no decision, staying flat: %s",
+                        stamp, seen, e)
             return 0.0, 0.0
 
-        pick = ans["choice"]
-        p = float(ans["probabilities"].get(pick, 0.0))
-        log.info("jev %s | %s → %s (p=%.2f)%s", stamp, sigs, pick, p,
+        choice = ans["choice"]
+        p = ans["probabilities"].get(choice, 0.0)
+        log.info("jev %s | %s → %s (p=%.2f)%s", stamp, seen, choice, p,
                  f" | {ans['reason']}" if ans.get("reason") else "")
-        chosen = fired.get(pick)
-        self.history.add(now, situation(state), {
-            n: ("long" if x.direction > 0 else "short", round(x.proba, 2),
-                self._fired_tr.get(n)) for n, x in fired.items()},
-            pick if chosen is not None else NONE)
-        if chosen is None:          # none (or an option that wasn't offered)
+
+        # what a long and a short entered here would each do — the worked example
+        # for later decisions, and (for an entry) its own track record
+        atr = float(ind.atr(bars, config.ATR_P)[-1])
+        sides = {side: self.memory.add(
+                     f"_{side}", dataclasses.replace(sig, direction=d,
+                                                     stop=sig.entry - d * sig.risk),
+                     now, atr=atr)
+                 for side, d in ((LONG, 1), (SHORT, -1))}
+        if choice in (LONG, SHORT) or signals:     # skip quiet no-signal flat bars
+            self.history.add(now, situation(state), signals, sides, choice)
+
+        if choice not in (LONG, SHORT):
+            return 0.0, 0.0
+        elapsed = time.monotonic() - self._t0
+        if config.LIVE and elapsed > config.JEV_MAX_DECISION_SEC:
+            log.warning("⚠️  jev %s | decision took %.0fs (> %ss) — price has moved "
+                        "on, skipping the entry", stamp, elapsed,
+                        config.JEV_MAX_DECISION_SEC)
             return 0.0, 0.0
 
-        for f in dataclasses.fields(chosen):
-            setattr(sig, f.name, getattr(chosen, f.name))
+        d = 1 if choice == LONG else -1
+        sig.direction, sig.stop = d, sig.entry - d * sig.risk
         sig.proba = p
-        self.name = sig.strategy = f"{JevStrategy.name}:{pick}"
+        self.name = sig.strategy = f"{JevStrategy.name}:{choice}"
         self._decided = True
-        self.memory.add(JEV, chosen, bars["time"].iloc[-1])
-        return p, chosen.r_hat
+        self.memory.add(JEV, sig, now, atr=atr)
+        return p, 0.0

@@ -33,6 +33,9 @@ TIMEFRAME_MIN = 3                # bar interval in minutes (CLI: --timeframe)
 TRAINED_TIMEFRAME_MIN = 3        # the interval the models/PPO were trained on; other
 #                                 timeframes run but are out of distribution
 SIZE = 1
+BARS_WINDOW = 500                # bars of history per step — live fetch AND backtest
+#                                 window, so both compute identical features
+LIVE = False                     # set by the live loop (bot.run); False in backtests
 
 # Micro contracts trade the SAME bars as their full-size parent (so the models
 # apply directly) at 1/10 the point value. Map each micro → its parent.
@@ -98,8 +101,10 @@ ORB_CLOSE_MIN = 16 * 60   # stop firing ORB breakouts at 16:00 ET — the openin
 #   the bot doesn't take low-quality overnight breakouts on the morning range.
 
 # Jev strategy (strategies/jev): a reasoning model IS the strategy. On every flat
-# bar it reads all the other strategies' views, live signals and track records and
-# decides long / short / none. Its decision IS the entry — PROBA_FLOOR does not apply.
+# bar it reads all the context the six strategies have (their views, any signals
+# with their model scores, their track records), the full market context and its
+# own last decisions, and decides long / short / none. The six strategies never
+# trade under jev. Its decision IS the entry — PROBA_FLOOR does not apply.
 #
 # The decider is swappable — "backend:model" here or JEV_DECIDER in .env:
 #   jev:jev-latest                       TypeSafe's hosted Jev (needs TYPESAFE_AI_API_KEY)
@@ -114,9 +119,15 @@ JEV_OPENAI_KEY = os.environ.get("JEV_OPENAI_KEY", "")
 JEV_LLM_THINK = os.environ.get("JEV_LLM_THINK", "1") != "0"   # chat models: reason
 #                             before answering (0 = off; faster, for tiny models)
 JEV_LLM_MAX_TOKENS = 2048   # chat models: reasoning + answer budget
-JEV_TIMEOUT = 120.0         # seconds per decision; a timeout skips the bar
-JEV_STRATEGIES = []         # strategies Jev listens to; [] = every one with a
-#                             model for the active timeframe
+JEV_TIMEOUT = 120.0         # seconds per chat-model decision (openai / mlx)
+JEV_API_TIMEOUT = 5.0       # seconds per hosted-Jev call (it answers in ~100 ms)
+JEV_RETRIES = 2             # retries on rate limit / overload / 5xx / connection
+JEV_MAX_DECISION_SEC = 20.0 # live: if deciding took longer, skip the entry (the
+#                             price it decided on is stale)
+JEV_ONLY_ON_SIGNALS = False # True = ask only on bars where a strategy fired
+#                             (fewer calls, e.g. for a slow local model)
+JEV_STRATEGIES = []         # strategies whose context Jev gets; [] = every one
+#                             with a model for the active timeframe
 JEV_CACHE_PATH = os.path.join(HERE, "log", "jev_cache.jsonl")   # identical
 #   requests are answered from here, so re-running a backtest makes no calls
 # Track record (strategies/jev/memory.py): every strategy signal is followed until
@@ -126,7 +137,9 @@ JEV_MEMORY_MAX_BARS = 20
 JEV_MEMORY_KEEP = 20
 JEV_MEMORY_BOOT_BARS = 400  # history replayed at startup to seed the record
 JEV_HISTORY_KEEP = 8        # past decisions shown as worked examples (situation →
-#                             choice → how every candidate turned out)
+#                             signals → choice → how a long and a short would have
+#                             done); quiet bars with no signal and no entry are skipped
+JEV_RECENT_SETUP_BARS = 10  # show cisd_ote's last setup only if this recent
 
 # ── models ─────────────────────────────────────────────────────────────
 MODELS_DIR = os.path.join(HERE, "models")

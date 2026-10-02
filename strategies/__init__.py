@@ -45,6 +45,9 @@ def make_strategies(active=None):
     cross-timeframe fallback (a 3-min model is not run on 1-min bars). Requesting
     one without a matching-timeframe model is a hard error."""
     active = active if active is not None else config.ACTIVE_STRATEGIES
+    if JevStrategy.name in active and len(active) > 1:
+        raise SystemExit("jev already uses every strategy's context and makes the "
+                         "decision itself — run it on its own (--strategy jev)")
     out = []
     for name in active:
         if name not in REGISTRY:

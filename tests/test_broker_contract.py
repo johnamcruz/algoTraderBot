@@ -64,3 +64,40 @@ def test_working_stop_order_filters_by_contract_type_and_status():
 def test_working_stop_order_none_when_no_match():
     c = StubClient({"/Order/searchOpen": {"orders": []}})
     assert c.working_stop_order(7, "NQU6") is None
+
+
+# ── bars: always the newest `limit` completed bars, across halts and weekends ─
+
+class BarsClient(broker.TopstepXClient):
+    """Returns `n` 3-min bars ending now, NEWEST first (order must not matter)."""
+    def __init__(self, n):
+        self.n, self.payload = n, None
+
+    def _post(self, path, payload, auth=True):
+        import datetime as dt
+        self.payload = payload
+        end = dt.datetime.now(dt.timezone.utc).replace(second=0, microsecond=0)
+        bars = [{"t": (end - dt.timedelta(minutes=3 * k)).isoformat(),
+                 "o": 1.0, "h": 2.0, "l": 0.5, "c": 1.5, "v": 10}
+                for k in range(self.n)]
+        return {"bars": bars}
+
+
+def test_get_bars_returns_newest_limit_bars_with_ohlcv():
+    c = BarsClient(n=2500)                    # API returned more than we keep
+    df = c.get_bars("CON", 3, limit=500)
+    assert len(df) == 500
+    assert list(df.columns[:6]) == ["time", "open", "high", "low", "close", "volume"]
+    assert df["time"].is_monotonic_increasing and str(df["time"].dt.tz) == "UTC"
+    assert df["time"].iloc[-1] == df["time"].max()      # the newest bar is kept
+
+
+def test_get_bars_requests_a_span_that_survives_weekends_and_halts():
+    import datetime as dt
+    c = BarsClient(n=10)
+    c.get_bars("CON", 3, limit=500)
+    p = c.payload
+    span = dt.datetime.fromisoformat(p["endTime"]) - dt.datetime.fromisoformat(p["startTime"])
+    assert span >= dt.timedelta(minutes=3 * 500, days=3)   # covers a weekend gap
+    assert p["limit"] >= 500 + 3 * 24 * 20                 # enough bars to fill it
+    assert p["includePartialBar"] is False                 # completed bars only

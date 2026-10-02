@@ -77,6 +77,8 @@ class BotContext:
         self.log_candles = log_candles
         self.tee = tee
         self.strategies = strat.make_strategies()
+        for s in self.strategies:
+            s.prepare()                   # fail fast on bad config, not mid-session
         self.policy = None
         pol = ensure_exit_policy()
         if pol:
@@ -208,6 +210,15 @@ def handle_bar(ctx: BotContext, bars, trade_state):
                                      stop_ticks=stop_ticks, target_ticks=target_ticks)
         log.info("🎯 ENTER %s %s [%s] %d | stop %dt | target %dt (%sR)",
                  stamp, side_txt, s.name, size, stop_ticks, target_ticks, config.RR)
+    if trade_state is not None:
+        # The broker places the stop relative to the actual fill, which can differ
+        # from the signal price (a slow decision, or an entry priced at the bar's
+        # open) — anchor the exit's R accounting to the fill too.
+        pos = c.open_position(ctx.account_id, ctx.contract_id)
+        fill = pos.get("averagePrice") if pos else None
+        if fill is not None:
+            trade_state["entry"] = float(fill)
+            trade_state["stop"] = float(fill) - sig.direction * sig.risk
     return trade_state
 
 
@@ -227,7 +238,9 @@ def run():
              config.PROBA_FLOOR, ctx.exit_mode, ctx.sizing_mode)
     log.info("▶ running — Ctrl-C to stop")
 
+    config.LIVE = True
     trade_state = None
+    last_bar = None
     rolled_on = dt.datetime.now(dt.timezone.utc).date()
     while True:
         # wait for the next bar close (+2s so the API has published it)
@@ -250,10 +263,20 @@ def run():
                     log.info("🔄 rolled to front contract %s (tick %g, $%g/tick)",
                              front.get("name", front["id"]),
                              ctx.tick_size, ctx.tick_value)
+                    for s in ctx.strategies:
+                        s.reset()         # old-contract state doesn't carry over
+                    last_bar = None
 
-            bars = client.get_bars(ctx.contract_id, config.TIMEFRAME_MIN)
+            bars = client.get_bars(ctx.contract_id, config.TIMEFRAME_MIN,
+                                   limit=config.BARS_WINDOW)
             if len(bars) < config.CTX + 30:    # need >=128 closes + warmup
                 continue
+            # No new bar yet (published late, daily halt, weekend): nothing has
+            # changed, so don't run the bar again — a strategy must never act twice
+            # on the same bar.
+            if last_bar is not None and bars["time"].iloc[-1] <= last_bar:
+                continue
+            last_bar = bars["time"].iloc[-1]
             trade_state = handle_bar(ctx, bars, trade_state)
         except Exception as e:        # keep the loop alive on transient errors
             log.warning("⚠️  %s", e)

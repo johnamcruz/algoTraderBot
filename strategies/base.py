@@ -141,6 +141,25 @@ class Strategy(ABC):
         r_hat = float(risk_head.predict(X)[0]) if risk_head is not None else 0.0
         return proba, r_hat
 
+    def train_end(self):
+        """End of this strategy's model training span (UTC Timestamp), or None
+        if the bundle doesn't record one. A signal at or before it is graded
+        IN-SAMPLE — its proba is effectively a leaked label."""
+        meta = self._load_bundle().get("training_metadata") or {}
+        span = meta.get("train_span")
+        return pd.Timestamp(span[1]) if span else None
+
+    def in_sample(self, t) -> bool:
+        """Whether a bar at time `t` lies inside this model's training span."""
+        end = self.train_end()
+        return end is not None and pd.Timestamp(t) <= end
+
+    def prepare(self):
+        """Startup hook (validate config, warm resources). Default: nothing."""
+
+    def reset(self):
+        """Forget per-market state (called on a contract roll). Default: nothing."""
+
     def accepts(self, sig: Signal) -> bool:
         """Whether to take a graded signal: its model proba clears PROBA_FLOOR."""
         return sig.proba >= config.PROBA_FLOOR

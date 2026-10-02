@@ -20,7 +20,7 @@ from sim_broker import SimBroker
 
 log = get_logger()
 
-WINDOW = 500           # trailing bars handed to each step (indicator warmup + CTX)
+WINDOW = config.BARS_WINDOW   # trailing bars per step — same as the live fetch
 
 
 def _load(symbol: str, end) -> pd.DataFrame:
@@ -79,6 +79,22 @@ def _resolve_specs(symbol):
     return ts, tv
 
 
+def _warn_in_sample(strategies, start):
+    """Loudly flag models whose training span covers the backtest start: their
+    probabilities there are in-sample (effectively leaked labels), so the result
+    overstates what live trading would see. (jev withholds those probabilities
+    from its decider; other strategies' proba floors still use them.)"""
+    models = []
+    for s in strategies:
+        models += getattr(s, "subs", None) or [s]
+    for m in models:
+        end = m.train_end()
+        if end is not None and start <= end:
+            log.warning("⚠️  IN-SAMPLE: %s's model was trained through %s — backtest "
+                        "from %s overlaps its training data; test after that date "
+                        "for an honest result", m.name, end.date(), start.date())
+
+
 def drive(ctx, sim, df, start_idx, window=WINDOW):
     """The per-bar backtest loop — the EXACT live logic (bot.handle_bar) driven
     through a SimBroker. Each bar: settle broker exits, then run the bot on a
@@ -122,6 +138,7 @@ def run_backtest(symbol="NQ", start=None, end=None):
         hits = df.index[df["time"] >= ts]
         start_idx = max(WINDOW, int(hits[0]) if len(hits) else len(df))
 
+    _warn_in_sample(ctx.strategies, df["time"].iloc[start_idx])
     names = "+".join(s.name for s in ctx.strategies)
     log.info("▶ backtest %s [%s] | %s → %s | %d bars | conf≥%.2f | exit: %s",
              symbol, names,

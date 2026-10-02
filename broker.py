@@ -119,22 +119,35 @@ class TopstepXClient(BrokerClient):
         c = self.get_active_contract(symbol, live)
         return float(c["tickSize"]), float(c["tickValue"])
 
+    # Extra calendar span requested on top of `limit` bars so the daily halt and a
+    # weekend never leave fewer than `limit` completed bars in the window.
+    BARS_GAP_DAYS = 4
+
     def get_bars(self, contract_id: str, minutes: int, limit: int = 300) -> pd.DataFrame:
+        """The newest `limit` completed bars (OHLCV, UTC times), oldest first.
+
+        A plain `limit × minutes` time window comes up short across the daily
+        halt and weekends, so request a span padded by BARS_GAP_DAYS and enough
+        bars to fill it, then keep the last `limit` — the same trading-bar window
+        the backtester uses, whatever order the API returns them in."""
         now = dt.datetime.now(dt.timezone.utc)
-        start = now - dt.timedelta(minutes=minutes * (limit + 2))
+        start = now - dt.timedelta(minutes=minutes * (limit + 2),
+                                   days=self.BARS_GAP_DAYS)
+        span_bars = int((now - start).total_seconds() // (minutes * 60)) + 2
         r = self._post("/History/retrieveBars", {
             "contractId": contract_id, "live": False,
             "startTime": start.isoformat(), "endTime": now.isoformat(),
             "unit": UNIT_MINUTE, "unitNumber": minutes,
-            "limit": limit, "includePartialBar": False,
+            "limit": span_bars, "includePartialBar": False,
         })
         df = pd.DataFrame(r.get("bars", []))
         if df.empty:
             return df
         df = df.rename(columns={"t": "time", "o": "open", "h": "high",
                                 "l": "low", "c": "close", "v": "volume"})
-        df["time"] = pd.to_datetime(df["time"])
-        return df.sort_values("time").reset_index(drop=True)
+        df["time"] = pd.to_datetime(df["time"], utc=True)
+        df = df.sort_values("time").drop_duplicates("time", keep="last")
+        return df.tail(limit).reset_index(drop=True)
 
     def open_position(self, account_id: int, contract_id: str) -> Optional[dict]:
         r = self._post("/Position/searchOpen", {"accountId": account_id})

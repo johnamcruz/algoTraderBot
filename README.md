@@ -94,15 +94,17 @@ several — when more than one fires on a bar, the highest-proba signal wins):
 | `bos` | break of the last confirmed swing (break of structure) |
 | `orb` | 15-min opening-range breakout (09:30 ET), gated to ADX ≥ 18 |
 | `cisd_ote` | CISD displacement → OTE fib-zone pullback (mean-reversion, ICT/SMC) |
-| `jev` | **context-driven pick:** runs all six strategies together; when any fire, a reasoning model picks which entry to take (or none) from everything they know — see [Jev](#jev-context-driven-entry-decisions) (opt-in; swappable model) |
+| `jev` | **a reasoning model is the strategy:** each flat bar it decides long / short / none itself, from all the context the six strategies have (market structure, SuperTrend, EMA, ADX, Keltner, ORB, CISD, their signals and track records) plus its last 8 decisions — the six never trade under `jev`. See [Jev](#jev-a-reasoning-model-decides-from-all-the-context) (opt-in; swappable model) |
 
-**Jev** (`--strategy jev`, opt-in, never the default) — instead of "highest proba
-wins", a reasoning model **decides which entry to take based on context**: it sees
-every strategy's view of the market, any live signals, how each strategy's recent
-signals have actually played out, and the full market feature set, then picks one
-fired entry or `none`. Its pick is the entry — `--proba-floor` does not apply. See
-[Jev: context-driven entry decisions](#jev-context-driven-entry-decisions) for exactly
-what it sees and how it decides.
+**Jev** (`--strategy jev`, opt-in, never the default) — a reasoning model **is the
+strategy**. The six strategies don't trade; they become its context. On every flat
+bar it reads the whole market picture (trend, structure, momentum, volatility,
+volume, session, liquidity sweeps, 1h/4h), what every strategy currently sees, any
+signals they fired with their model scores, how each one's recent signals actually
+played out, and its own last 8 decisions — then decides **long, short or none**.
+Its decision is the entry (no `--proba-floor`), with the standard `STOP_ATR × ATR`
+stop; the PPO exit manages it. Run it on its own (it can't be combined with other
+strategies). See [Jev: a reasoning model decides from all the context](#jev-a-reasoning-model-decides-from-all-the-context).
 
 The model is swappable via `JEV_DECIDER` (`.env`) as `backend:model`:
 
@@ -223,8 +225,9 @@ YM, GC) and generalize across them; the framework is ticker- and broker-agnostic
   `grade()`. Signals with `proba ≥ PROBA_FLOOR` are candidates; the **highest
   proba wins** (one position per contract). The trade enters at market with a
   protective stop at `0.5×ATR(20)` — exactly how the models scored the trade.
-  With `--strategy jev`, a reasoning model picks the entry from context instead
-  (see [Jev](#jev-context-driven-entry-decisions)).
+  With `--strategy jev`, a reasoning model decides long / short / none itself from
+  all the strategies' context instead (see
+  [Jev](#jev-a-reasoning-model-decides-from-all-the-context)).
 - **Exit** — each bar the PPO policy (`ppo_exit/policies/`) reads the open
   trade's R-state (unrealized R, MFE, stop distance, ATR/risk, time, momentum) —
   **strategy-agnostic**, it never sees how the trade was entered, so one policy
@@ -267,69 +270,75 @@ YM, GC) and generalize across them; the framework is ticker- and broker-agnostic
   engines and asserts an identical exit bar **and price**, including the
   spike-and-reverse market-close case. The PPO was retrained on this corrected sim.
 
-### Jev: context-driven entry decisions
+### Jev: a reasoning model decides from all the context
 
-With `--strategy jev` the six strategies stop competing on probability and become a
-**panel of evidence** for one decision-maker. Jev decides *which* entry to take —
-and whether to take any — **from context**, not from a fixed rule.
+With `--strategy jev` a reasoning model **is the strategy**. The six mechanical
+strategies never place a trade — they run every bar purely to give the model their
+context, and the model decides on its own whether to go **long, short or stay flat**.
 
 ```
-each flat bar ─► all six strategies run together (detect + their views)
-              ─► nothing fired?  → no decision, stay flat (no model call)
-              ─► something fired → each fired signal is graded by its own model
-              ─► Jev gets the whole panel's context  →  picks one fired entry or none
-              ─► the pick enters with ITS strategy's side + stop; PPO trails the exit
+each flat bar ─► all six strategies run (views + any signals, graded by their models)
+              ─► the consolidated context is built (below) + the last 8 decisions
+              ─► the decider answers: long / short / none
+              ─► long/short enters at market, stop STOP_ATR × ATR; PPO trails the exit
 ```
 
-**What Jev sees** — every strategy contributes, whether it fired or not:
+**What it sees** — every fact once, in readable units (ATR relative to the current
+close, US Eastern time), consolidated so nothing is duplicated:
 
-| input | what it tells Jev |
+| block | contents |
 |---|---|
-| each strategy's **view** | how that strategy reads the market right now: SuperTrend bias + bars since flip, EMA spread/slope, Keltner position, distance to swing highs/lows, opening-range position, CISD zone + 1h trend, and whether each strategy's ADX/session gate is open |
-| each fired **signal** | side, stop distance, its own model's win-probability and expected R, and the named **setup** features that model scored (e.g. `break_ext_atr`, `range_volume_ratio`, CISD `had_sweep` / `displacement`) |
-| each strategy's **track record** | how its recent signals *actually played out* in this market — every signal it fires (taken or not) is followed to +2R / its stop / 20 bars; Jev sees the win rate, average R and last outcomes (e.g. `L W L W`) |
-| **context** | the full 76-feature set every strategy model sees: bar shape, returns, volume, volatility, session, structure, liquidity sweeps, higher-timeframe trend |
-| **market** + **yourRecentPicks** | ADX, volatility, session, recent path — and how Jev's own recent picks went |
-| **recentDecisions** | its last `JEV_HISTORY_KEEP` (8) decisions as worked examples: the situation (session, ADX, SuperTrend/EMA bias, 1h trend, recent move), every candidate, what it chose, and how **every** candidate turned out — so a skipped loser or a missed winner is visible (`pending` until it really resolves) |
+| `market` | the shared picture: **time** (session, ET time, weekday) · **trend** (ADX + slope, swing structure, 1h / 4h move and range position, whether 1h and 4h agree) · **momentum** (returns over 1/5/20/60 bars, last 30 closes, speed, consistency) · **volatility** (ATR in bps, vs its median, z-score, range ratios, realized vol) · **volume** (vs averages, buy/sell pressure, absorption, whether it confirms the move) · **lastBar** (candle type, body/wicks, rejection) · **session** (distance from open/high/low/VWAP) · **range** (10/20-bar high/low/position) · **liquiditySweeps** (1h/4h bullish/bearish, age, size) |
+| `strategies` | per strategy, only what's unique to it: its **view** (SuperTrend bias + bars since flip, EMA bias/spread/slope, Keltner position, swing highs/lows, opening range, CISD 1h EMA trend + recent setup, whether each ADX gate is open); its **signal** if it fired this bar (side, stop, its model's win probability + expected R, setup details like break strength or sweep/displacement); its **track record** — every signal it fires is followed to +2R / −1R and Jev sees the average R, win rate and last outcomes, so it knows which setups are working *now* |
+| `yourRecentPicks` | the same +2R / −1R record for its own entries |
+| `recentDecisions` | its last `JEV_HISTORY_KEEP` (8) decisions as worked examples: the situation, which signals fired, what it chose, and how **both** a long and a short entered there turned out — so a missed winner or a dodged loser is visible. Quiet bars with no signal and no entry aren't logged. |
 
-So Jev can reason like: *"bos fired long, but bos has been stopped out 6 of its last 8
-times, SuperTrend and EMA both read down and the 1h trend is down — take none"*, or
-*"keltner and bos both fired short in a strong ADX downtrend and keltner has been
-working today — take keltner."* Example decision from a backtest log:
+The question tells it the outcome being judged (+2R before the −1R stop within 20
+bars), the timing (fill at the close, stop size, trailing exit after entry), and the
+economics (2:1 payoff ⇒ worth taking above ~0.33), and explains every field.
 
-```
-jev 2026-06-03 07:39 | supertrend(S 0.36) → none (p=0.75) | The market is in a sideways
-regime with low ADX (15.2) and mixed signals from strategies. The supertrend is short
-but with low model win probability (0.36) and a negative average return…
-```
+**Guards**
 
-**How the decision is used**
-
-- **The pick is the entry** — no `PROBA_FLOOR`. It enters with the chosen strategy's
-  own side and stop (CISD keeps its pivot stop); sizing, broker and the PPO exit are
-  exactly as for any other trade. Logs and backtest breakdowns show `jev:<strategy>`.
-- **`none`, an unavailable model, a timeout or an unreadable answer → stay flat.**
-- **No hindsight:** everything is relative (ATR units, time of day) — no prices or
-  dates — and track records only count outcomes that have already happened.
-- **While a trade is open** the bot only manages the exit, so the strategies aren't
-  evaluated live; on the next flat bar Jev replays every missed bar in order, so the
-  track records never lose a signal. At startup the last `JEV_MEMORY_BOOT_BARS` (400)
-  bars are replayed to seed them. The decision history starts empty on each run
-  (past decisions need the model, so they aren't replayed).
-- **Decisions are cached** in `log/jev_cache.jsonl`: re-running a backtest makes no
-  model calls.
+- **No hindsight.** Nothing is absolute (no prices, dates or raw volume), the context
+  at a bar is identical whether or not later bars exist (tested), and outcomes in the
+  track records and decision history appear only once they've actually happened.
+- **No leaked model scores.** A strategy model's win probability is withheld
+  (`modelInSample: true`) on bars inside that model's training span — there it would
+  be a leaked label. The backtester also warns loudly when a test range overlaps any
+  model's training (today `bos`, `ema` and `orb` are trained through the end of the
+  shipped data, so honest tests of those scores need data after 2026-06-04).
+- **One decision per bar.** A bar is never decided twice (the live loop also skips a
+  bar the broker returns again during halts/weekends).
+- **Stale decisions don't trade.** Live, if deciding took longer than
+  `JEV_MAX_DECISION_SEC` (20 s), the entry is skipped. After any entry, the exit's R
+  accounting is anchored to the actual fill.
+- **Failures stay flat.** `none`, a timeout, an error, or a malformed answer
+  (validated: the choice must be one of the options) → no trade. Hosted Jev calls time
+  out after 5 s and retry rate limits / 5xx twice.
+- **Misconfiguration fails at startup**, not mid-session (unknown backend, missing
+  key or `mlx-lm`).
+- **Contract roll** resets the track records and decision history (old-contract
+  prices don't carry over).
+- **Same data live and in backtests.** Both use the newest `BARS_WINDOW` (500)
+  completed bars; the TopstepX fetch pads its request across the daily halt and
+  weekends so it always returns a full window of OHLCV.
+- **Decisions are cached** in `log/jev_cache.jsonl` keyed by the model, state,
+  question and the backend's prompt/settings — re-running a backtest makes no model
+  calls, and changing a prompt or setting never reuses old answers.
 
 **The decision is only as good as the model.** In testing, a tiny local model
-(Qwen3-0.6B) took every fired entry and lost money, while larger models used the
-track records and declined weak setups. Always backtest a decider against the
-plain multi-strategy baseline (`--strategy supertrend ema keltner bos orb cisd_ote`)
-over several weeks before trading it.
+(Qwen3-0.6B) entered almost every time and lost money, while a larger one used the
+track records and declined weak setups. Before trading any decider, backtest it
+against the plain multi-strategy baseline (`--strategy supertrend ema keltner bos orb
+cisd_ote`) over several out-of-sample weeks, and treat any dates you tuned prompts on
+as used.
 
-Knobs (`config.py`): `JEV_DECIDER`, `JEV_STRATEGIES` (the panel; `[]` = all with a
-model for the timeframe), `JEV_MEMORY_TARGET_R` / `JEV_MEMORY_MAX_BARS` /
-`JEV_MEMORY_KEEP` (track record), `JEV_HISTORY_KEEP` (past decisions fed back),
-`JEV_LLM_THINK` / `JEV_LLM_MAX_TOKENS` (chat
-models), `JEV_TIMEOUT`.
+Knobs (`config.py`): `JEV_DECIDER`; `JEV_STRATEGIES` (whose context it gets; `[]` = all
+with a model for the timeframe); `JEV_HISTORY_KEEP` (past decisions fed back, 8);
+`JEV_ONLY_ON_SIGNALS` (ask only on bars where a strategy fired — fewer calls for a slow
+local model); `JEV_MEMORY_TARGET_R` / `JEV_MEMORY_MAX_BARS` / `JEV_MEMORY_KEEP` (track
+record); `JEV_MAX_DECISION_SEC`, `JEV_API_TIMEOUT`, `JEV_RETRIES`, `JEV_TIMEOUT`;
+`JEV_LLM_THINK` / `JEV_LLM_MAX_TOKENS` (chat models).
 
 ### Order safety (live)
 
@@ -390,10 +399,10 @@ strategies/                 ppo_exit/   (the PPO trailing-exit subsystem)
   bos.py        → bos          precompute_proba.py entry-grading for training
   orb.py        → orb          exit_configs.json  per-timeframe ACTIVATE_R/GIVEBACK_R/STOP_ATR
   cisd_ote.py   → cisd_ote     policies/          the trained .npz policies (per timeframe)
-  jev/          → jev  (context-driven pick over all the others)
-    strategy.py   runs the panel, asks the decider, turns the pick into the entry
-    state.py      what the decider sees (views, signals, track records, context)
-    memory.py     each strategy's live track record (+2R / stop / timeout)
+  jev/          → jev  (a reasoning model decides long/short/none from the others' context)
+    strategy.py   runs the panel each bar, asks the decider, turns the answer into the entry
+    state.py      the consolidated context + the question (what the decider sees)
+    memory.py     track records (+2R / stop) and the last-8-decisions log
     deciders.py   Decider interface + jev / mlx / openai backends
 
 models/   supertrend_chronos.joblib + _1min  ema_cross / keltner_adx / bos / orb _chronos.joblib
@@ -415,8 +424,9 @@ near-instant. Falls back to the one-shot library path if the worker can't start.
 `_hand_features()`, plus its joblib model in `models/`, then register it in
 `strategies/__init__.py`. The strategy-agnostic exit applies automatically — no
 exit work per strategy. Six ship today (`supertrend`, `ema`, `keltner`, `bos`, `orb`,
-`cisd_ote`), and `jev` picks among them automatically — a new strategy joins its
-panel too (add a view in `strategies/jev/state.py` to give Jev its read of the market).
+`cisd_ote`), and a new strategy automatically becomes context for `jev` too (add a
+view in `strategies/jev/state.py`, and its setup features to `SETUP_FEATURES`, to give
+Jev its full read of the market).
 
 **Adding a decider** = subclass `Decider` (or `ChatDecider` for a chat LLM) in
 `strategies/jev/deciders.py` and register it in `DECIDERS`; select it with
@@ -522,8 +532,19 @@ and lightweight fakes. Coverage focuses on the order/exit money paths:
 - `test_exit_configs` — per-timeframe exit config load/save (`exit_configs.json`)
 - `test_optimize_exit` — the Optuna scanner's metric/split math and that the
   give-back replay is genuinely sensitive to each config knob
+- `test_jev_strategy` — the Jev strategy: decider wire format, answer validation,
+  retries, cache key and reply parsing; causal track records and decision history;
+  the consolidated context (no duplicates, readable labels, no lookahead, no prices or
+  dates, in-sample model scores withheld); long/short/none entries with the standard
+  stop; one decision per bar; stale-decision skip; startup checks; fill rebase
 
 ## Caveats
+
+- **In-sample models**: `bos`, `ema` and `orb` were trained on the shipped data
+  through 2026-06-04 (no holdout), and the `cisd_ote` training pipeline peeks up to
+  ~21 min ahead when filtering zones. Their scores are optimistic on any shipped
+  date; retrain with a holdout (in the Futures-Foundation-Model repo) for honest
+  backtests. `jev` withholds in-sample scores from its decider.
 
 - **Scope**: entry models are trained on NQ/ES/RTY/YM/GC 3-min UTC bars and
   generalize across them; other tickers/timeframes are out of distribution until
